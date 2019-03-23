@@ -16,7 +16,80 @@ library(boot)
 
 ## Read data 
 
+Read data
 ```{r}
+apple <- read_csv("./data/AppleStore.csv") %>% 
+  janitor::clean_names() %>% select(-c(x1, track_name, id, currency))
+  
+
+  mutate(cont_rating = factor(cont_rating, levels = c("4+", "9+", "12+", "17")),
+         prime_genre = as.factor(prime_genre))
+names(apple) 
+str(apple) # 7197 observations 16 variables 
+skimr::skim(apple)
+summary(apple)
+anyNA(apple) # no missing values
+```
+
+Look at and modify variables
+```{r}
+unique(apple$currency) # all price on USD unit, so remove this
+apple <- apple %>% select(-c(currency, x1, id, track_name))
+dim(apple) # 13 variables left
 
 ```
+
+Response: user_rating  
+
+Predictors might be used:  
+user_rating: Average User Rating value (for all version)
+Predictors: 
+
+1.	size_bytes: Size (in Bytes)
+2.	price: Price amount ($)
+3.	rating_count_tot: User Rating counts (for all version)
+4.	rating_count_ver: User Rating counts (for current version)
+5.	user_rating_ver: Average User Rating value (for current version)
+6.	ver: Latest version code
+7.	cont_rating: Content Rating
+8.	prime_genre: Primary Genre
+9.	sup_devices.num: Number of supporting devices
+10.	ipadSc_urls.num: Number of screenshots shown for display
+11.	lang.num: Number of supported languages
+12.	vpp_lic: Vpp Device Based Licensing Enabled
+
+## EDA
+
+```{r}
+# predictor pool
+names(apple)
+x <- model.matrix(user_rating ~ size_bytes + price + rating_count_tot + rating_count_ver + 
+                    user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                    ipad_sc_urls_num + lang_num + vpp_lic, data = apple)[,-1] # remove the intercept column; design matrix
+x
+# response
+y <- apple$user_rating
+unique(y)
+
+dim(x)
+length(y)
+
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.line$col <- rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+featurePlot(x, y, plot = "scatter", labels = c("","Y"),
+            type = c("p"), layout = c(5,2))
+
+plot(apple$size_bytes, y)
+plot(apple$price, y)
+plot(apple$rating_count_tot, y)
+```
+ 
+response only take 10 values
+
+
 
