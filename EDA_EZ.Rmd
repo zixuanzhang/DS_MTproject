@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(caret)
 library(boot)
+library(corrplot)
 ```
 
 ## Read data 
@@ -19,25 +20,23 @@ library(boot)
 Read data
 ```{r}
 apple <- read_csv("./data/AppleStore.csv") %>% 
-  janitor::clean_names() %>% select(-c(x1, track_name, id, currency))
-  
+  janitor::clean_names() 
 
-  mutate(cont_rating = factor(cont_rating, levels = c("4+", "9+", "12+", "17")),
-         prime_genre = as.factor(prime_genre))
-names(apple) 
-str(apple) # 7197 observations 16 variables 
-skimr::skim(apple)
+str(apple) # 7197 observations 17 variables (including response)
+unique(apple$currency) # all price on USD unit, so remove this
+
+apple <- apple %>% 
+  select(-c(x1, track_name, id, currency, ver)) # %>% 
+
+  
+ # mutate(cont_rating = factor(cont_rating, levels = c("4+", "9+", "12+", "17+")),
+         #prime_genre = as.factor(prime_genre))
+  
 summary(apple)
 anyNA(apple) # no missing values
+str(apple) # select 11 covariables 
 ```
 
-Look at and modify variables
-```{r}
-unique(apple$currency) # all price on USD unit, so remove this
-apple <- apple %>% select(-c(currency, x1, id, track_name))
-dim(apple) # 13 variables left
-
-```
 
 Response: user_rating  
 
@@ -50,7 +49,7 @@ Predictors:
 3.	rating_count_tot: User Rating counts (for all version)
 4.	rating_count_ver: User Rating counts (for current version)
 5.	user_rating_ver: Average User Rating value (for current version)
-6.	ver: Latest version code
+6.	ver: Latest version code (removed)
 7.	cont_rating: Content Rating
 8.	prime_genre: Primary Genre
 9.	sup_devices.num: Number of supporting devices
@@ -62,18 +61,16 @@ Predictors:
 
 ```{r}
 # predictor pool
-names(apple)
-x <- model.matrix(user_rating ~ size_bytes + price + rating_count_tot + rating_count_ver + 
-                    user_rating_ver + cont_rating + prime_genre + sup_devices_num +
-                    ipad_sc_urls_num + lang_num + vpp_lic, data = apple)[,-1] # remove the intercept column; design matrix
+x <- model.matrix(user_rating ~., data = apple)[,-1] # remove the intercept column; design matrix
 x
+dim(x)
 # response
 y <- apple$user_rating
 unique(y)
+```
 
-dim(x)
-length(y)
-
+feature plot
+```{r}
 theme1 <- trellis.par.get()
 theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
 theme1$plot.symbol$pch <- 16
@@ -82,14 +79,22 @@ theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
 featurePlot(x, y, plot = "scatter", labels = c("","Y"),
-            type = c("p"), layout = c(5,2))
+            type = c("p"), layout = c(5,2)) # ???? 
+```
 
+correlation plot excluding two factor variables : content rating and genre
+```{r}
 plot(apple$size_bytes, y)
 plot(apple$price, y)
 plot(apple$rating_count_tot, y)
+pairs(apple[-c(7,8)])
 ```
  
-response only take 10 values
+
+```{r}
+corrplot(cor(x), method = "circle",tl.cex = 0.5)
+```
+
 
 
 
