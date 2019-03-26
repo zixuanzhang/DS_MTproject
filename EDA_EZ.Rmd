@@ -84,15 +84,28 @@ featurePlot(x, y, plot = "scatter", labels = c("","Y"),
 
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
-plot(apple$size_bytes, y)
-plot(apple$price, y)
-plot(apple$rating_count_tot, y)
+apple <- apple %>% select(user_rating, everything())
 pairs(apple[-c(7,8)])
-```
- 
 
-```{r}
+appleCor <-  cor(apple[-c(7,8)]) # correlation matrix of the modified dataset above
+summary(appleCor[upper.tri(appleCor)]) # summary
+findCorrelation(appleCor, cutoff = .75)
+
+appleCor > 0.75 # user rating (all version) and user rating (current version)
+
 corrplot(cor(x), method = "circle",tl.cex = 0.5)
+
+table(apple$prime_genre) # games are oversampled
+table(apple$cont_rating) # 4+ is oversampled
+```
+
+Comment: correlation between covariates are not significant; user rating and user rating version are highly correlated. (0.77)
+Games, 4+ rating are oversampled
+
+check linear dependency of numerical predictors (no problematic predictors)
+```{r}
+nzv <- nearZeroVar(apple) # nzv: near zero variance
+dim(apple[, -nzv])
 ```
 
 
