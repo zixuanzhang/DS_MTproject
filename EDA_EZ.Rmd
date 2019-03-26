@@ -13,6 +13,8 @@ library(tidyverse)
 library(caret)
 library(boot)
 library(corrplot)
+library(pls)
+library(glmnet)
 ```
 
 ## Read data 
@@ -108,6 +110,120 @@ nzv <- nearZeroVar(apple) # nzv: near zero variance
 dim(apple[, -nzv])
 ```
 
+## Fit model
+
+#### variable selection: ridge and lasso
+
+ridge regression
+```{r}
+ridge.mod <- glmnet(x, # design matrix (will be standardized by glmnet by default)
+                    y, # response
+                    alpha = 0, # ridge regression
+                    lambda = exp(seq(-1, 10, length=100)))
+# use cv to select lambda
+
+set.seed(1234)
+# by default, use 10 fold cv
+cv.ridge <- cv.glmnet(x, y, 
+                      alpha = 0, 
+                      lambda = exp(seq(-10, 6, length=100)), 
+                      type.measure = "mse")
+
+plot(cv.ridge) 
+cv.ridge$lambda.min
+predict(cv.ridge, s="lambda.min", 
+        type="coefficients")
+```
+
+lasso regression
+```{r}
+# return the final model
+cv.lasso <- cv.glmnet(x,y, alpha = 1, # lasso method
+                      lambda = exp(seq(-10, 6, length=100)))
+# find the lambda that gave the smallest test MSE
+plot(cv.lasso)
+cv.lasso$lambda.min # 0.011
+predict(cv.lasso, s="lambda.min", 
+        type="coefficients")
+```
+
+elastic net
+```{r}
+set.seed(1234)
+ctrl1 <- trainControl(method = "repeatedcv", # 10 fold CV for 5 times, then average result
+                      number = 10, repeats = 5)
+enet.fit <- train(x, y,
+                     method = "glmnet",
+                     tuneGrid = expand.grid(alpha = seq(0, 1, length = 5), #0,0.25,0.5,0.75,1
+                                            lambda = exp(seq(-10, 6, length=50))),
+                   # preProc = c("center", "scale"),
+                     trControl = ctrl1)
+enet.fit$bestTune # best alpha = 1 (lasso), best lambda = 0.0117
+
+ggplot(enet.fit)
+```
+
+#### nonlinear
+
+```{r}
+
+```
+
+#### PCR
+
+```{r}
+set.seed(1234)
+# index for the row of training data
+trRows <- createDataPartition(apple$user_rating,
+                              p = .75,
+                              list = F)
+
+# training data
+# matrix of predictors (glmnet uses input matrix)
+x_train <- model.matrix(user_rating ~., apple)[trRows,-1] # glmnet() make design matrix, exclude the intercept
+x_train
+# vector of response(train)
+y_train <- apple$user_rating[trRows]
+
+# test data
+x_test <- model.matrix(user_rating ~., apple)[-trRows,-1]
+y_test <- apple$user_rating[-trRows]
+```
+
+```{r}
+set.seed(1234) # can try other seed
+
+# pcr take argument as formula
+pcr.mod <- pcr(user_rating~.,  # formula
+               data = apple[trRows,], # only use training data; or use subset = __
+               scale = TRUE, # recommended to scale all predictors before PCR, the default is False
+               # center = FALSE, by default
+               validation = "CV")  # 10 CV, or use "LOO"
+# another argument: ncomp = ___, if not specified, model will fit for all predictors
+
+summary(pcr.mod) # CV and adj CV (unbiased one after adjusting for the method)
+pcr.mod$model
+pcr.mod$fitted.values
+validationplot(pcr.mod, val.type="MSEP", # type of validation result (MSE prediction), or RMSEP (square root)
+               legendpos = "topright") # ncomp = 32 gives the smallest MSEP
+
+# test MSE
+predy2.pcr <- predict(pcr.mod, newdata = x_test, ncomp = 32)
+mean((predy2.pcr-y_test)^2) # 0.898
+View(pcr.mod$coefficients)
+```
+
+#### Lasso (for variable selection)
 
 
+#### linear
+
+```{r}
+lm1 <- lm(user_rating ~., data = apple)
+summary(lm1) # 34 components
+```
+
+```{r}
+hist(apple$user_rating)
+```
 
