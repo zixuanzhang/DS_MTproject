@@ -8,7 +8,8 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.width = 7,fig.asp = .7,out.width = "90%",
+                      message = FALSE, warning = FALSE)
 library(tidyverse)
 library(caret)
 library(boot)
@@ -17,7 +18,7 @@ library(pls)
 library(glmnet)
 ```
 
-## Read data 
+## Read and clean data 
 
 Read data
 ```{r}
@@ -28,12 +29,8 @@ str(apple) # 7197 observations 17 variables (including response)
 unique(apple$currency) # all price on USD unit, so remove this
 
 apple <- apple %>% 
-  select(-c(x1, track_name, id, currency, ver)) # %>% 
+  select(-c(x1, track_name, id, currency, ver)) # remove 
 
-  
- # mutate(cont_rating = factor(cont_rating, levels = c("4+", "9+", "12+", "17+")),
-         #prime_genre = as.factor(prime_genre))
-  
 summary(apple)
 anyNA(apple) # no missing values
 str(apple) # select 11 covariables 
@@ -42,8 +39,8 @@ str(apple) # select 11 covariables
 
 Response: user_rating  
 
-Predictors might be used:  
-user_rating: Average User Rating value (for all version)
+__user_rating__: Average User Rating value (for all version)
+
 Predictors: 
 
 1.	size_bytes: Size (in Bytes)
@@ -51,13 +48,12 @@ Predictors:
 3.	rating_count_tot: User Rating counts (for all version)
 4.	rating_count_ver: User Rating counts (for current version)
 5.	user_rating_ver: Average User Rating value (for current version)
-6.	ver: Latest version code (removed)
-7.	cont_rating: Content Rating
-8.	prime_genre: Primary Genre
-9.	sup_devices.num: Number of supporting devices
-10.	ipadSc_urls.num: Number of screenshots shown for display
-11.	lang.num: Number of supported languages
-12.	vpp_lic: Vpp Device Based Licensing Enabled
+6.	cont_rating: Content Rating
+7.	prime_genre: Primary Genre
+8.	sup_devices.num: Number of supporting devices
+9.	ipadSc_urls.num: Number of screenshots shown for display
+10.	lang.num: Number of supported languages
+11.	vpp_lic: Vpp Device Based Licensing Enabled
 
 ## EDA
 
@@ -92,10 +88,11 @@ pairs(apple[-c(7,8)])
 appleCor <-  cor(apple[-c(7,8)]) # correlation matrix of the modified dataset above
 summary(appleCor[upper.tri(appleCor)]) # summary
 findCorrelation(appleCor, cutoff = .75)
+appleCor
 
 appleCor > 0.75 # user rating (all version) and user rating (current version)
 
-corrplot(cor(x), method = "circle",tl.cex = 0.5)
+corrplot::corrplot(cor(x), method = "circle",tl.cex = 0.5)
 
 table(apple$prime_genre) # games are oversampled
 table(apple$cont_rating) # 4+ is oversampled
@@ -110,57 +107,84 @@ nzv <- nearZeroVar(apple) # nzv: near zero variance
 dim(apple[, -nzv])
 ```
 
+split into train and test data
+```{r}
+set.seed(1234)
+trRows <- createDataPartition(apple$user_rating, # vector of outcomes
+                              p = .80, # percentage of training data (random assign)
+                              list = FALSE) # in a matrix form 
+trRows
+
+# train data
+x_train <- model.matrix(user_rating ~., data = apple[trRows,])[,-1] 
+x_train
+dim(x_train) # 5759
+y_train <- apple[trRows,]$user_rating
+unique(y_train)
+
+# test data
+x_test <- model.matrix(user_rating ~., data = apple[-trRows,])[,-1] 
+x_test
+dim(x_test) # 1438
+y_test <- apple[-trRows,]$user_rating
+unique(y_test)
+```
+
+
 ## Fit model
 
-#### variable selection: ridge and lasso
+### variable selection: ridge and lasso
 
-ridge regression
+ridge regression: we have large number of predictors(including categorical variables, so lots of dummy variables)
+
+use ridge regression from `glmnet` package
 ```{r}
-ridge.mod <- glmnet(x, # design matrix (will be standardized by glmnet by default)
-                    y, # response
-                    alpha = 0, # ridge regression
-                    lambda = exp(seq(-1, 10, length=100)))
-# use cv to select lambda
+# ridge regression with 100 tuning parameter values (model formula)
+ridge.model <- glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-10, 6, length = 100)))
+```
 
+use 10 fold CV to select tuning para.
+```{r}
 set.seed(1234)
-# by default, use 10 fold cv
-cv.ridge <- cv.glmnet(x, y, 
-                      alpha = 0, 
-                      lambda = exp(seq(-10, 6, length=100)), 
+cv.ridge <- cv.glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-10, 6, length = 100)), 
                       type.measure = "mse")
 
-plot(cv.ridge) 
-cv.ridge$lambda.min
-predict(cv.ridge, s="lambda.min", 
-        type="coefficients")
+# plot CV result as a function of tuning para.
+plot(cv.ridge)
+
+# optimal lambda:
+cv.ridge$lambda.min # 0.00492
+# 1SE lambda:
+cv.ridge$lambda.1se # 0.28
 ```
+
+obtain coefficients of ridge model: optimal and sparse
+```{r}
+# use the optimal:
+best.lambda <- cv.ridge$lambda.min
+predict(ridge.model, s = best.lambda, type = "coefficients") # on original scale
+
+# use sparse model:
+best.1se.lambda <- cv.ridge$lambda.1se
+predict(ridge.model, s = best.1se.lambda, type = "coefficients")
+```
+
+predict on ridge model
+```{r}
+pred.ridge <- predict(ridge.model, s = best.lambda, newx = x_test, type = "response")
+# MSE
+sum((y_test - pred.ridge)^2) / length(y_test) # 0.829
+```
+
 
 lasso regression
 ```{r}
-# return the final model
-cv.lasso <- cv.glmnet(x,y, alpha = 1, # lasso method
-                      lambda = exp(seq(-10, 6, length=100)))
-# find the lambda that gave the smallest test MSE
-plot(cv.lasso)
-cv.lasso$lambda.min # 0.011
-predict(cv.lasso, s="lambda.min", 
-        type="coefficients")
+
 ```
 
 elastic net
 ```{r}
-set.seed(1234)
-ctrl1 <- trainControl(method = "repeatedcv", # 10 fold CV for 5 times, then average result
-                      number = 10, repeats = 5)
-enet.fit <- train(x, y,
-                     method = "glmnet",
-                     tuneGrid = expand.grid(alpha = seq(0, 1, length = 5), #0,0.25,0.5,0.75,1
-                                            lambda = exp(seq(-10, 6, length=50))),
-                   # preProc = c("center", "scale"),
-                     trControl = ctrl1)
-enet.fit$bestTune # best alpha = 1 (lasso), best lambda = 0.0117
 
-ggplot(enet.fit)
 ```
 
 #### nonlinear
@@ -223,7 +247,4 @@ lm1 <- lm(user_rating ~., data = apple)
 summary(lm1) # 34 components
 ```
 
-```{r}
-hist(apple$user_rating)
-```
 
