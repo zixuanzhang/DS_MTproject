@@ -135,6 +135,8 @@ unique(y_test)
 
 ### variable selection: ridge and lasso
 
+1. use glmnet package
+
 ridge regression: we have large number of predictors(including categorical variables, so lots of dummy variables)
 
 use ridge regression from `glmnet` package
@@ -176,16 +178,103 @@ pred.ridge <- predict(ridge.model, s = best.lambda, newx = x_test, type = "respo
 sum((y_test - pred.ridge)^2) / length(y_test) # 0.829
 ```
 
-
-lasso regression
+Lasso regression from `glmnet` package
 ```{r}
+# ridge regression with 100 tuning parameter values (model formula)
+lasso.model <- glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 100)))
+```
 
+use 10 fold CV to select tuning para.
+```{r}
+set.seed(1234)
+cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 100)), 
+                      type.measure = "mse")
+plot(cv.lasso)
+
+# optimal lambda:
+cv.lasso$lambda.min # 0.011
+# 1SE lambda:
+cv.lasso$lambda.1se # 0.09
+```
+
+obtain coefficients of ridge model: optimal and sparse
+```{r}
+# use the optimal:
+best.lambda <- cv.lasso$lambda.min
+predict(lasso.model, s = best.lambda, type = "coefficients") # on original scale
+
+# use sparse model:
+best.1se.lambda <- cv.lasso$lambda.1se
+predict(lasso.model, s = best.1se.lambda, type = "coefficients")
+```
+
+predict on ridge model
+```{r}
+pred.lasso <- predict(lasso.model, s = best.lambda, newx = x_test, type = "response")
+# MSE
+sum((y_test - pred.lasso)^2) / length(y_test) # 0.83
+```
+
+2. use caret package(better for comparison)
+
+use all data points: since this function will do repeated cv for us, we better feed it with all data we have.
+
+```{r}
+ctr1 <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
+set.seed(1234)
+ridge.fit <- train(x, y, method = "glmnet", 
+                   tuneGrid = expand.grid(alpha = 0,
+                                          lambda = exp(seq(-10, 6, length = 100))),
+                   trControl = ctr1) # ?? warnings
+
+lasso.fit <- train(x, y, method = "glmnet", 
+                   tuneGrid = expand.grid(alpha = 1,
+                                          lambda = exp(seq(-10, 6, length = 100))),
+                   trControl = ctr1)
+plot(ridge.fit)
+plot(lasso.fit)
+```
+
+look at model
+```{r}
+ridge.fit$bestTune # 0.106
+lasso.fit$bestTune # 0.0094 almost no penalty
+
+# coefficients
+predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, type="coefficients")
+predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, type="coefficients")
 ```
 
 elastic net
 ```{r}
-
+set.seed(1234)
+enet.fit <- train(x, y, method = "glmnet", 
+                   tuneGrid = expand.grid(alpha = seq(0, 1, length = 5),
+                                          lambda = exp(seq(-10, 6, length = 100))),
+                   trControl = ctr1)
+enet.fit$bestTune 
+plot(enet.fit) 
 ```
+comment: shows alpha = 1 (lasso) gives the lowest RMSE
+
+compare between lasso, ridge, linear fit
+```{r}
+set.seed(1234)
+lm.fit <- train(x_train, y_train, method = "lm", trControl = ctr1)
+
+resamp <- resamples(list(ridge = ridge.fit, lasso = lasso.fit, lm = lm.fit))
+summary(resamp)
+parallelplot(resamp, metric = "RMSE")
+bwplot(resamp, metric = "RMSE")
+```
+comment: lasso seems to outperform the other two. We should use the lasso model. The RMSE is similar to cv result from glmnet package
+
+selected model: lasso 
+```{r}
+lasso.fit$bestTune # 0.011
+predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, type="coefficients")
+```
+
 
 #### nonlinear
 
