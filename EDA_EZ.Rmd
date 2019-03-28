@@ -68,7 +68,7 @@ unique(y)
 ```
 
 feature plot
-```{r}
+```{r eval=FALSE}
 theme1 <- trellis.par.get()
 theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
 theme1$plot.symbol$pch <- 16
@@ -215,6 +215,17 @@ pred.lasso <- predict(lasso.model, s = best.lambda, newx = x_test, type = "respo
 sum((y_test - pred.lasso)^2) / length(y_test) # 0.83
 ```
 
+fit linear model
+```{r}
+lm.model <- lm(user_rating ~., data = apple)
+summary(lm.model)
+pred.lm <- predict(lm.model, newdata = data.frame(x_test), type = "response")
+dim(pred.lm)
+names(data.frame(x_test))
+sum((y_test - pred.lm)^2) / length(y_test)
+```
+
+
 2. use caret package(better for comparison)
 
 use all data points: since this function will do repeated cv for us, we better feed it with all data we have.
@@ -222,12 +233,12 @@ use all data points: since this function will do repeated cv for us, we better f
 ```{r}
 ctr1 <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
 set.seed(1234)
-ridge.fit <- train(x, y, method = "glmnet", 
+ridge.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = 0,
                                           lambda = exp(seq(-10, 6, length = 100))),
                    trControl = ctr1) # ?? warnings
 
-lasso.fit <- train(x, y, method = "glmnet", 
+lasso.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = 1,
                                           lambda = exp(seq(-10, 6, length = 100))),
                    trControl = ctr1)
@@ -238,7 +249,7 @@ plot(lasso.fit)
 look at model
 ```{r}
 ridge.fit$bestTune # 0.106
-lasso.fit$bestTune # 0.0094 almost no penalty
+lasso.fit$bestTune # 0.011 almost no penalty
 
 # coefficients
 predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, type="coefficients")
@@ -248,14 +259,14 @@ predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, type="coefficients")
 elastic net
 ```{r}
 set.seed(1234)
-enet.fit <- train(x, y, method = "glmnet", 
+enet.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = seq(0, 1, length = 5),
                                           lambda = exp(seq(-10, 6, length = 100))),
                    trControl = ctr1)
 enet.fit$bestTune 
 plot(enet.fit) 
 ```
-comment: shows alpha = 1 (lasso) gives the lowest RMSE
+comment: shows alpha = 1 (lasso) with lambda = 0.011 gives the lowest RMSE
 
 compare between lasso, ridge, linear fit
 ```{r}
@@ -267,12 +278,16 @@ summary(resamp)
 parallelplot(resamp, metric = "RMSE")
 bwplot(resamp, metric = "RMSE")
 ```
-comment: lasso seems to outperform the other two. We should use the lasso model. The RMSE is similar to cv result from glmnet package
 
-selected model: lasso 
+Comment: lasso and ridge does not improve the linear model. Since we assume the strict linear relationships between covariates and response, the regulation from ridge and lasso did not improve the linear model. This implies that the functional form of predictive model may not be merely linear
+
+test MSE
 ```{r}
-lasso.fit$bestTune # 0.011
-predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, type="coefficients")
+sum((y_test - predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, newx = x_test,
+          type="response"))^2) / length(y_test) # 0.84
+sum((y_test - predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, newx = x_test,
+          type="response"))^2) / length(y_test) # 0.83
+sum((y_test - predict(lm.fit, newdata = x_test))^2) / length(y_test) # 0.82
 ```
 
 
