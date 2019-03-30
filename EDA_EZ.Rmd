@@ -16,6 +16,8 @@ library(boot)
 library(corrplot)
 library(pls)
 library(glmnet)
+library(splines)
+library(mgcv)
 ```
 
 ## Read and clean data 
@@ -281,7 +283,7 @@ mean((y_test - predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, newx =
 mean((y_test - predict(lm.fit, newdata = x_test))^2) # 0.90
 ```
 
-#### PCR
+### PCR and PLS
 
 ```{r}
 appleCor[appleCor > 0.5]
@@ -334,13 +336,151 @@ bwplot(resamp, metric = "RMSE")
 
 Comment: models performance are very alike linear regression. 
 
-#### nonlinear
+### Beyond linear
+
+add nonlinear components in the model
+
+#### Polynomials
+
+CV to compare models up to d = 4 and make plot
+
+add higher order on size_bytes
+```{r}
+ctrl2 <- trainControl(method = "cv", number = 10)
+
+set.seed(1234)
+lmFit1 <- train(user_rating ~ size_bytes,
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2) 
+lmFit2 <- train(user_rating ~ poly(size_bytes,2),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit3 <- train(user_rating ~ poly(size_bytes,3),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit4 <- train(user_rating ~ poly(size_bytes,4),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+summary(resamp) # MSE
+
+bwplot(resamp, metric = "RMSE")
+```
+
+comment: No improve
+
+add higher order on price
+```{r}
+set.seed(1234)
+lmFit1 <- train(user_rating ~ price,
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2) 
+lmFit2 <- train(user_rating ~ poly(price,2),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit3 <- train(user_rating ~ poly(price,3),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit4 <- train(user_rating ~ poly(price,4),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+summary(resamp) # MSE
+
+bwplot(resamp, metric = "RMSE")
+```
+comment: did not improve much, so keep d = 1
+
+add higher order on rating_count_tot
+```{r}
+set.seed(1234)
+lmFit1 <- train(user_rating ~ rating_count_tot,
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2) 
+lmFit2 <- train(user_rating ~ poly(rating_count_tot,2),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit3 <- train(user_rating ~ poly(rating_count_tot,3),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit4 <- train(user_rating ~ poly(rating_count_tot,4),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+summary(resamp) # MSE
+
+bwplot(resamp, metric = "RMSE")
+```
+
+Comment: does not improve
+
+add higher order on lang_num
+```{r}
+set.seed(1234)
+lmFit1 <- train(user_rating ~ lang_num,
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2) 
+lmFit2 <- train(user_rating ~ poly(lang_num,2),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit3 <- train(user_rating ~ poly(lang_num,3),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+lmFit4 <- train(user_rating ~ poly(lang_num,4),
+                data = apple[trRows, ], 
+                method = "lm",
+                trControl = ctrl2)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+summary(resamp) # MSE
+
+bwplot(resamp, metric = "RMSE")
+```
+
+Conclusion: add polynomial component of lang_num and size_bytes does not make too much difference
+
+Comment: it does not really improve too much; so better keep d = 1
+
+check anova
+```{r}
+fit1 <- lm(user_rating~size_bytes, data = apple[trRows,])  # y ~ X 
+fit2 <- lm(user_rating~poly(size_bytes,2), data = apple[trRows,]) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(size_bytes,3), data = apple[trRows,]) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(size_bytes,4), data = apple[trRows,]) # y ~ X + X^2 + X^3 + X^4
+anova(fit1, fit2, fit3, fit4)
+
+fit1 <- lm(user_rating~lang_num, data = apple[trRows,])  # y ~ X 
+fit2 <- lm(user_rating~poly(lang_num,2), data = apple[trRows,]) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(lang_num,3), data = apple[trRows,]) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(lang_num,4), data = apple[trRows,])
+anova(fit1, fit2, fit3, fit4)
+```
+
+Comment: ANOVA result suggest adding d = 3 to lang_num and d = 4 on size_bytes
+How to decide on this?
+
+#### Smoothing splines
 
 ```{r}
 
 ```
-
-
-
 
 
