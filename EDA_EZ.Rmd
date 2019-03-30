@@ -83,7 +83,8 @@ featurePlot(x, y, plot = "scatter", labels = c("","Y"),
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
 apple <- apple %>% select(user_rating, everything())
-pairs(apple[-c(7,8)])
+
+# pairs(apple[-c(7,8)])
 
 appleCor <-  cor(apple[-c(7,8)]) # correlation matrix of the modified dataset above
 summary(appleCor[upper.tri(appleCor)]) # summary
@@ -111,7 +112,7 @@ split into train and test data
 ```{r}
 set.seed(1234)
 trRows <- createDataPartition(apple$user_rating, # vector of outcomes
-                              p = .80, # percentage of training data (random assign)
+                              p = .75, # percentage of training data (random assign)
                               list = FALSE) # in a matrix form 
 trRows
 
@@ -155,9 +156,9 @@ cv.ridge <- cv.glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-10, 6, leng
 plot(cv.ridge)
 
 # optimal lambda:
-cv.ridge$lambda.min # 0.00492
+cv.ridge$lambda.min # 0.013
 # 1SE lambda:
-cv.ridge$lambda.1se # 0.28
+cv.ridge$lambda.1se # 0.2027
 ```
 
 obtain coefficients of ridge model: optimal and sparse
@@ -175,7 +176,7 @@ predict on ridge model
 ```{r}
 pred.ridge <- predict(ridge.model, s = best.lambda, newx = x_test, type = "response")
 # MSE
-sum((y_test - pred.ridge)^2) / length(y_test) # 0.829
+mean((y_test - pred.ridge)^2) # 0.90
 ```
 
 Lasso regression from `glmnet` package
@@ -192,9 +193,9 @@ cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, leng
 plot(cv.lasso)
 
 # optimal lambda:
-cv.lasso$lambda.min # 0.011
+cv.lasso$lambda.min # 0.013
 # 1SE lambda:
-cv.lasso$lambda.1se # 0.09
+cv.lasso$lambda.1se # 0.077
 ```
 
 obtain coefficients of ridge model: optimal and sparse
@@ -212,17 +213,7 @@ predict on ridge model
 ```{r}
 pred.lasso <- predict(lasso.model, s = best.lambda, newx = x_test, type = "response")
 # MSE
-sum((y_test - pred.lasso)^2) / length(y_test) # 0.83
-```
-
-fit linear model
-```{r}
-lm.model <- lm(user_rating ~., data = apple)
-summary(lm.model)
-pred.lm <- predict(lm.model, newdata = data.frame(x_test), type = "response")
-dim(pred.lm)
-names(data.frame(x_test))
-sum((y_test - pred.lm)^2) / length(y_test)
+mean((y_test - pred.lasso)^2) # 0.9022
 ```
 
 
@@ -283,13 +274,65 @@ Comment: lasso and ridge does not improve the linear model. Since we assume the 
 
 test MSE
 ```{r}
-sum((y_test - predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, newx = x_test,
-          type="response"))^2) / length(y_test) # 0.84
-sum((y_test - predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, newx = x_test,
-          type="response"))^2) / length(y_test) # 0.83
-sum((y_test - predict(lm.fit, newdata = x_test))^2) / length(y_test) # 0.82
+mean((y_test - predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, newx = x_test,
+          type="response"))^2) # 0.9062
+mean((y_test - predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, newx = x_test,
+          type="response"))^2)  # 0.9022
+mean((y_test - predict(lm.fit, newdata = x_test))^2) # 0.90
 ```
 
+#### PCR
+
+```{r}
+appleCor[appleCor > 0.5]
+```
+Based on previous result, correlation between variables are not very significant; only user_rating(all version) and user_rating(current version) is highly correlated
+
+PCR:
+```{r}
+set.seed(1234)
+pcr.fit <- train(x_train, y_train,
+                  method = "pcr",
+                  tuneLength = 34,
+                  trControl = ctr1,
+                  scale = TRUE) 
+
+pred.pcr <- predict(pcr.fit$finalModel, newdata = x_test,
+                       ncomp = pcr.fit$bestTune[[1]]) # tuning paramter to choose
+mean((pred.pcr - y_test)^2)
+
+ggplot(pcr.fit, highlight = TRUE) + theme_bw()
+```
+
+PLS:
+```{r}
+set.seed(1234)
+pls.fit <- train(x_train, y_train,
+                  method = "pls",
+                  tuneLength = 34,
+                  trControl = ctr1,
+                  scale = TRUE) 
+
+pred.pls <- predict(pls.fit$finalModel, newdata = x_test,
+                       ncomp = pls.fit$bestTune[[1]]) # tuning paramter to choose
+mean((pred.pls - y_test)^2) # 0.9
+
+ggplot(pls.fit, highlight = TRUE) + theme_bw()
+```
+
+compare btw all models above
+```{r}
+resamp <- resamples(list(lasso = lasso.fit, 
+                         ridge = ridge.fit, 
+                         pcr = pcr.fit, 
+                         pls = pls.fit,
+                         lm = lm.fit)) 
+summary(resamp)
+
+bwplot(resamp, metric = "RMSE")
+```
+
+Comment: models performance are very alike linear regression. 
 
 #### nonlinear
 
@@ -297,13 +340,7 @@ sum((y_test - predict(lm.fit, newdata = x_test))^2) / length(y_test) # 0.82
 
 ```
 
-#### PCR
 
-
-#### Lasso (for variable selection)
-
-
-#### linear
 
 
 
