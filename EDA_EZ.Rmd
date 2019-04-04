@@ -32,7 +32,7 @@ unique(apple$currency) # all price on USD unit, so remove this
 
 apple <- apple %>% 
   select(-c(x1, track_name, id, currency, ver)) %>% 
-  mutate(size_bytes = round(size_bytes * 1e-6))
+  mutate(size_bytes = round(size_bytes * 1e-6)) # convert to megabytes
 
 summary(apple)
 anyNA(apple) # no missing values
@@ -82,6 +82,25 @@ trellis.par.set(theme1)
 featurePlot(x, y, plot = "scatter", labels = c("","Y"),
             type = c("p"), layout = c(5,2)) 
 ```
+
+Look variables distribution
+```{r}
+# continuous variables
+hist(apple$size_bytes)
+hist(apple$price) 
+hist(apple$rating_count_tot)
+hist(apple$rating_count_ver)
+hist(apple$user_rating) # response
+hist(apple$sup_devices_num)
+hist(apple$ipad_sc_urls_num)
+hist(apple$lang_num)
+
+table(apple$cont_rating) # categorical
+table(apple$prime_genre) # categorical
+table(apple$vpp_lic) # binary 
+
+```
+
 
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
