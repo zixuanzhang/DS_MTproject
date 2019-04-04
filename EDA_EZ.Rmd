@@ -107,41 +107,40 @@ theme1$plot.line$col <- rgb(.8, .1, .1, 1)
 theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
-featurePlot(apple[, -c(3,5,6)], apple$user_rating, plot = "scatter", labels = c("","Y"),
+featurePlot(apple_train[, -c(3,5,6)], apple_train$user_rating, plot = "scatter", labels = c("","Y"),
             type = c("p"), layout = c(4,2)) # plot numerical values
 dev.off()
 ```
 
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
-apple <- apple %>% select(user_rating, everything())
+apple_train <- apple_train %>% select(user_rating, everything())
 summary(apple)
 
-appleCor <-  cor(apple[-c(5,6)]) # correlation matrix of the modified dataset above
+appleCor <-  cor(apple_train[-c(5,6)]) # correlation matrix of the modified dataset above
+appleCor
 summary(appleCor[upper.tri(appleCor)]) # summary
 findCorrelation(appleCor, cutoff = .75)
 appleCor
 
 appleCor > 0.75 # user rating (all version) and user rating (current version)
 
-
-corrplot::corrplot(cor(apple[,-c()]), method = "circle",tl.cex = 0.5)
-
-table(apple$prime_genre) # games are oversampled
-table(apple$cont_rating) # 4+ is oversampled
+x_train <- model.matrix(user_rating ~., data = apple_train)[,-1]
+corrplot::corrplot(cor(x_train), method = "circle",tl.cex = 0.5)
 ```
 
-Comment: correlation between covariates are not significant; user rating and user rating version are highly correlated. (0.77)
+Comment: correlation between covariates are not significant; user rating(response) and user rating version are highly correlated. (0.77)
 Games, 4+ rating are oversampled
 
 check linear dependency of numerical predictors (no problematic predictors)
 ```{r}
-nzv <- nearZeroVar(apple) # nzv: near zero variance
-apple <- apple[, -nzv]
-combInfo <- findLinearCombos(apple[,-c(7,8)]) # on numerical values
+nzv <- nearZeroVar(apple_train) # nzv: near zero variance
+apple_train <- apple_train[, -nzv]
+combInfo <- findLinearCombos(apple_train[,-c(5,6)]) # on numerical values
 combInfo # no linear dependency problem
-names(apple)
+names(apple_train) # remove vpp_lic
 ```
+
 
 ## split into train and test data
 
