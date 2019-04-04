@@ -72,6 +72,7 @@ unique(y)
 
 feature plot
 ```{r eval=FALSE}
+#jpeg('feature_plot.jpeg')
 theme1 <- trellis.par.get()
 theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
 theme1$plot.symbol$pch <- 16
@@ -79,8 +80,9 @@ theme1$plot.line$col <- rgb(.8, .1, .1, 1)
 theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
-featurePlot(x, y, plot = "scatter", labels = c("","Y"),
-            type = c("p"), layout = c(5,2)) 
+featurePlot(x[, c(1:5,31:33)], y, plot = "scatter", labels = c("","Y"),
+            type = c("p"), layout = c(2,4)) # plot numerical values
+#dev.off()
 ```
 
 Look variables distribution
@@ -126,10 +128,14 @@ Games, 4+ rating are oversampled
 check linear dependency of numerical predictors (no problematic predictors)
 ```{r}
 nzv <- nearZeroVar(apple) # nzv: near zero variance
-dim(apple[, -nzv])
+apple <- apple[, -nzv]
+combInfo <- findLinearCombos(apple[,-c(7,8)]) # on numerical values
+combInfo # no linear dependency problem
+names(apple)
 ```
 
-split into train and test data
+## split into train and test data
+
 ```{r}
 set.seed(1234)
 trRows <- createDataPartition(apple$user_rating, # vector of outcomes
