@@ -80,7 +80,7 @@ theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
 featurePlot(x, y, plot = "scatter", labels = c("","Y"),
-            type = c("p"), layout = c(5,2)) # ???? 
+            type = c("p"), layout = c(5,2)) 
 ```
 
 correlation plot excluding two factor variables : content rating and genre
@@ -569,3 +569,10 @@ gam.m3 <- gam(user_rating ~ s(size_bytes) + price + rating_count_tot + rating_co
 anova(gam.m1, gam.m2, gam.m3, test = "F")
 ```
 
+use logistic regression to fit the model
+can add penalty term on the regression model
+gam for logistic regression
+
+DALEX package
+
+can use naive bayes for both quantitative and qualitative variables
