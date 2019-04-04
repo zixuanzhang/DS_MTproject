@@ -20,7 +20,7 @@ library(splines)
 library(mgcv)
 ```
 
-## Read and clean data 
+## Prepare and clean data 
 
 Read data
 ```{r}
@@ -31,7 +31,7 @@ str(apple) # 7197 observations 17 variables (including response)
 unique(apple$currency) # all price on USD unit, so remove this
 
 apple <- apple %>% 
-  select(-c(x1, track_name, id, currency, ver)) %>% 
+  select(-c(x1, track_name, id, currency, ver, rating_count_tot, rating_count_ver)) %>% 
   mutate(size_bytes = round(size_bytes * 1e-6)) # convert to megabytes
 
 summary(apple)
@@ -39,6 +39,17 @@ anyNA(apple) # no missing values
 str(apple) # select 11 covariables 
 ```
 
+Create train and test data
+```{r}
+set.seed(1234)
+trRows <- createDataPartition(apple$user_rating, # vector of outcomes
+                              p = .75, # percentage of training data (random assign)
+                              list = FALSE) # in a matrix form 
+apple_train <- apple[trRows,] # 5399 rows
+dim(apple_train)
+apple_test <- apple[-trRows,] # 1798 rows
+dim(apple_test)
+```
 
 Response: user_rating  
 
@@ -48,31 +59,47 @@ Predictors:
 
 1.	size_bytes: Size (in Bytes)
 2.	price: Price amount ($)
-3.	rating_count_tot: User Rating counts (for all version)
-4.	rating_count_ver: User Rating counts (for current version)
-5.	user_rating_ver: Average User Rating value (for current version)
-6.	cont_rating: Content Rating
-7.	prime_genre: Primary Genre
-8.	sup_devices.num: Number of supporting devices
-9.	ipadSc_urls.num: Number of screenshots shown for display
-10.	lang.num: Number of supported languages
-11.	vpp_lic: Vpp Device Based Licensing Enabled
+3.	user_rating_ver: Average User Rating value (for current version)
+4.	cont_rating: Content Rating
+5.	prime_genre: Primary Genre
+6.	sup_devices.num: Number of supporting devices
+7.	ipadSc_urls.num: Number of screenshots shown for display
+8.	lang.num: Number of supported languages
+9.	vpp_lic: Vpp Device Based Licensing Enabled
 
 ## EDA
 
+Look variables distribution
 ```{r}
-# predictor pool
-x <- model.matrix(user_rating ~., data = apple)[,-1] # remove the intercept column; design matrix
-x
-dim(x)
-# response
-y <- apple$user_rating
-unique(y)
+summary(apple_train)
+# continuous variables
+hist(apple_train$size_bytes) # right skew
+hist(apple_train$size_bytes[apple_train$size_bytes < 1000]) # right skewed
+sum(apple_train$size_bytes < 1000) # 5213/5399 = 96% 
+
+hist(apple_train$price)
+hist(apple_train$price[apple_train$price < 10])
+sum(apple_train$price < 10) # 5328/5399 = 99%
+
+hist(apple_train$user_rating) # response
+
+hist(apple_train$user_rating_ver) 
+
+hist(apple_train$sup_devices_num)
+hist(apple_train$ipad_sc_urls_num)
+unique(apple_train$ipad_sc_urls_num) # 0,1,2,3,4,5
+
+hist(apple_train$lang_num)
+
+table(apple_train$cont_rating) # categorical
+table(apple_train$prime_genre) # categorical
+unique(apple_train$prime_genre)
+table(apple_train$vpp_lic) # binary
 ```
 
 feature plot
 ```{r eval=FALSE}
-#jpeg('feature_plot.jpeg')
+jpeg('feature_plot.jpg')
 theme1 <- trellis.par.get()
 theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
 theme1$plot.symbol$pch <- 16
@@ -80,43 +107,25 @@ theme1$plot.line$col <- rgb(.8, .1, .1, 1)
 theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
-featurePlot(x[, c(1:5,31:33)], y, plot = "scatter", labels = c("","Y"),
-            type = c("p"), layout = c(2,4)) # plot numerical values
-#dev.off()
+featurePlot(apple[, -c(3,5,6)], apple$user_rating, plot = "scatter", labels = c("","Y"),
+            type = c("p"), layout = c(4,2)) # plot numerical values
+dev.off()
 ```
-
-Look variables distribution
-```{r}
-# continuous variables
-hist(apple$size_bytes)
-hist(apple$price) 
-hist(apple$rating_count_tot)
-hist(apple$rating_count_ver)
-hist(apple$user_rating) # response
-hist(apple$sup_devices_num)
-hist(apple$ipad_sc_urls_num)
-hist(apple$lang_num)
-
-table(apple$cont_rating) # categorical
-table(apple$prime_genre) # categorical
-table(apple$vpp_lic) # binary
-```
-
 
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
 apple <- apple %>% select(user_rating, everything())
 summary(apple)
-# pairs(apple[-c(7,8)])
 
-appleCor <-  cor(apple[-c(7,8)]) # correlation matrix of the modified dataset above
+appleCor <-  cor(apple[-c(5,6)]) # correlation matrix of the modified dataset above
 summary(appleCor[upper.tri(appleCor)]) # summary
 findCorrelation(appleCor, cutoff = .75)
 appleCor
 
 appleCor > 0.75 # user rating (all version) and user rating (current version)
 
-corrplot::corrplot(cor(x), method = "circle",tl.cex = 0.5)
+
+corrplot::corrplot(cor(apple[,-c()]), method = "circle",tl.cex = 0.5)
 
 table(apple$prime_genre) # games are oversampled
 table(apple$cont_rating) # 4+ is oversampled
@@ -135,6 +144,16 @@ names(apple)
 ```
 
 ## split into train and test data
+
+```{r}
+# predictor pool
+x <- model.matrix(user_rating ~., data = apple)[,-1] # remove the intercept column; design matrix
+x
+dim(x)
+# response
+y <- apple$user_rating
+unique(y)
+```
 
 ```{r}
 set.seed(1234)
