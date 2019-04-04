@@ -97,8 +97,7 @@ hist(apple$lang_num)
 
 table(apple$cont_rating) # categorical
 table(apple$prime_genre) # categorical
-table(apple$vpp_lic) # binary 
-
+table(apple$vpp_lic) # binary
 ```
 
 
