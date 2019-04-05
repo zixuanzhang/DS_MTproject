@@ -11,6 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, fig.width = 7,fig.asp = .7,out.width = "90%",
                       message = FALSE, warning = FALSE)
 library(tidyverse)
+library(ggridges)
 library(caret)
 library(boot)
 library(corrplot)
@@ -32,7 +33,7 @@ str(apple) # 7197 observations 17 variables (including response)
 unique(apple$currency) # all price on USD unit, so remove this
 
 apple <- apple %>% 
-  select(-c(x1, track_name, id, currency, ver, rating_count_tot, rating_count_ver)) %>% 
+  dplyr::select(-c(x1, track_name, id, currency, ver, rating_count_tot, rating_count_ver)) %>%
   mutate(size_bytes = round(size_bytes * 1e-6)) # convert to megabytes
 
 summary(apple)
@@ -103,9 +104,29 @@ featurePlot(apple[, -c(3,5,6)], apple$user_rating, plot = "scatter", labels = c(
 dev.off()
 ```
 
+More visualization
+```{r}
+# genre user rating
+apple %>% group_by(prime_genre) %>% 
+  # summarize(mean_rating = mean(user_rating)) %>% 
+  mutate(mean_rating = mean(user_rating)) %>% 
+  ungroup() %>% 
+  mutate(prime_genre = forcats::fct_reorder(prime_genre, mean_rating)) %>% 
+  ggplot(aes(x = prime_genre, y = user_rating)) + geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# content rating
+apple %>% group_by(cont_rating) %>% 
+  # summarize(mean_rating = mean(user_rating)) %>% 
+  mutate(mean_rating = mean(user_rating)) %>% 
+  ungroup() %>% 
+  mutate(cont_rating = forcats::fct_reorder(cont_rating, mean_rating)) %>% 
+  ggplot(aes(x = cont_rating, y = user_rating)) + geom_boxplot()
+```
+
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
-apple <- apple %>% select(user_rating, everything())
+apple <- apple %>% dplyr::select(user_rating, everything())
 summary(apple)
 
 appleCor <-  cor(apple[-c(5,6)]) # correlation matrix of the modified dataset above
@@ -117,7 +138,10 @@ appleCor
 appleCor > 0.75 # user rating (all version) and user rating (current version)
 
 x <- model.matrix(user_rating ~., data = apple)[,-1]
+
+#jpeg('corr_plot.jpg')
 corrplot::corrplot(cor(x), method = "circle",tl.cex = 0.5)
+#dev.off()
 ```
 
 Comment: correlation between covariates are not significant; user rating(response) and user rating version are highly correlated. (0.77)
@@ -132,12 +156,15 @@ combInfo # no linear dependency problem
 names(apple) # remove vpp_lic; 8 predictors + 1 response
 ```
 
-##Box-Cox Transformation
+## Box-Cox Transformation
+
 ```{r}
-apple = apple %>% 
-  mutate(user_rating_new = user_rating + 0.01)
-mult.fit1 <- lm(user_rating_new ~ size_bytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num + vpp_lic, data = apple) 
+apple <- apple %>% 
+  mutate(user_rating_new = ifelse(user_rating < 0.5, user_rating + 0.01, user_rating))
+mult.fit1 <- lm(user_rating_new ~ size_bytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num, data = apple) 
 boxcox(mult.fit1) 
+
+apple <- dplyr::select(apple, -user_rating_new)
 ```
 
 
@@ -407,19 +434,19 @@ ctrl2 <- trainControl(method = "cv", number = 10)
 
 set.seed(1234)
 lmFit1 <- train(user_rating ~ size_bytes,
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2) 
 lmFit2 <- train(user_rating ~ poly(size_bytes,2),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 lmFit3 <- train(user_rating ~ poly(size_bytes,3),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 lmFit4 <- train(user_rating ~ poly(size_bytes,4),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 
@@ -429,25 +456,25 @@ summary(resamp) # MSE
 bwplot(resamp, metric = "RMSE")
 ```
 
-comment: No improve
+comment: d = 4
 
 add higher order on price
 ```{r}
 set.seed(1234)
 lmFit1 <- train(user_rating ~ price,
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2) 
 lmFit2 <- train(user_rating ~ poly(price,2),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 lmFit3 <- train(user_rating ~ poly(price,3),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 lmFit4 <- train(user_rating ~ poly(price,4),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 
@@ -458,23 +485,23 @@ bwplot(resamp, metric = "RMSE")
 ```
 comment: did not improve much, so keep d = 1
 
-add higher order on rating_count_tot
+add higher order on  user_rating_ver
 ```{r}
 set.seed(1234)
-lmFit1 <- train(user_rating ~ rating_count_tot,
-                data = apple[trRows, ], 
+lmFit1 <- train(user_rating ~ user_rating_ver,
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2) 
-lmFit2 <- train(user_rating ~ poly(rating_count_tot,2),
-                data = apple[trRows, ], 
+lmFit2 <- train(user_rating ~ poly(user_rating_ver,2),
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
-lmFit3 <- train(user_rating ~ poly(rating_count_tot,3),
-                data = apple[trRows, ], 
+lmFit3 <- train(user_rating ~ poly(user_rating_ver,3),
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
-lmFit4 <- train(user_rating ~ poly(rating_count_tot,4),
-                data = apple[trRows, ], 
+lmFit4 <- train(user_rating ~ poly(user_rating_ver,4),
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 
@@ -484,25 +511,25 @@ summary(resamp) # MSE
 bwplot(resamp, metric = "RMSE")
 ```
 
-Comment: does not improve
+Comment: d = 3 on user_rating_ver
 
 add higher order on lang_num
 ```{r}
 set.seed(1234)
 lmFit1 <- train(user_rating ~ lang_num,
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2) 
 lmFit2 <- train(user_rating ~ poly(lang_num,2),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 lmFit3 <- train(user_rating ~ poly(lang_num,3),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 lmFit4 <- train(user_rating ~ poly(lang_num,4),
-                data = apple[trRows, ], 
+                data = apple_train, 
                 method = "lm",
                 trControl = ctrl2)
 
@@ -518,16 +545,22 @@ Comment: it does not really improve too much; so better keep d = 1
 
 check anova
 ```{r}
-fit1 <- lm(user_rating~size_bytes, data = apple[trRows,])  # y ~ X 
-fit2 <- lm(user_rating~poly(size_bytes,2), data = apple[trRows,]) # y ~ X + X^2
-fit3 <- lm(user_rating~poly(size_bytes,3), data = apple[trRows,]) # y ~ X + X^2 + X^3
-fit4 <- lm(user_rating~poly(size_bytes,4), data = apple[trRows,]) # y ~ X + X^2 + X^3 + X^4
+fit1 <- lm(user_rating~size_bytes, data = apple_train)  # y ~ X 
+fit2 <- lm(user_rating~poly(size_bytes,2), data = apple_train) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(size_bytes,3), data = apple_train) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(size_bytes,4), data = apple_train) # y ~ X + X^2 + X^3 + X^4
 anova(fit1, fit2, fit3, fit4)
 
-fit1 <- lm(user_rating~lang_num, data = apple[trRows,])  # y ~ X 
-fit2 <- lm(user_rating~poly(lang_num,2), data = apple[trRows,]) # y ~ X + X^2
-fit3 <- lm(user_rating~poly(lang_num,3), data = apple[trRows,]) # y ~ X + X^2 + X^3
-fit4 <- lm(user_rating~poly(lang_num,4), data = apple[trRows,])
+fit1 <- lm(user_rating~user_rating_ver, data = apple_train)  # y ~ X 
+fit2 <- lm(user_rating~poly(user_rating_ver,2), data = apple_train) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(user_rating_ver,3), data = apple_train) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(user_rating_ver,4), data = apple_train) # y ~ X + X^2 + X^3 + X^4
+anova(fit1, fit2, fit3, fit4)
+
+fit1 <- lm(user_rating~lang_num, data = apple_train)  # y ~ X 
+fit2 <- lm(user_rating~poly(lang_num,2), data = apple_train) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(lang_num,3), data = apple_train) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(lang_num,4), data = apple_train)
 anova(fit1, fit2, fit3, fit4)
 ```
 
@@ -538,13 +571,13 @@ How to decide on this?
 
 fit smoothing spline on size_bytes
 ```{r}
-p <- ggplot(data = apple[trRows,], aes(x = size_bytes, y = user_rating)) +
+p <- ggplot(data = apple_train, aes(x = size_bytes, y = user_rating)) +
      geom_point(color = rgb(.2, .4, .2, .5))
 p
 
-fit.ss <- smooth.spline(apple[trRows,]$size_bytes, # predictor (univariate)
-                        apple[trRows,]$user_rating)  # response
-fit.ss$df 
+fit.ss <- smooth.spline(apple_train$size_bytes, # predictor (univariate)
+                        apple_train$user_rating)  # response
+fit.ss$df # 14.5
 
 # look at the range
 sizelims <- range(apple$size_bytes)
@@ -565,12 +598,12 @@ geom_line(aes(x = size, y = pred), data = pred.ss.df,
 
 fit smoothing spline to lang_num
 ```{r}
-fit.ss <- smooth.spline(apple[trRows,]$lang_num, # predictor (univariate)
-                        apple[trRows,]$user_rating)  # response
+fit.ss <- smooth.spline(apple_train$lang_num, # predictor (univariate)
+                        apple_train$user_rating)  # response
 fit.ss$df 
 
 # look at the range
-langlims <- range(apple$lang_num)
+langlims <- range(apple_train$lang_num)
 
 # create a sequence of observations pgg45
 lang.grid <- seq(from = langlims[1],to = langlims[2])
@@ -581,16 +614,41 @@ pred.ss.df <- data.frame(pred = pred.ss$y,
                          lang = lang.grid)
 pred.ss.df
 
-ggplot(data = apple[trRows,], aes(x = lang_num, y = user_rating)) +
+ggplot(data = apple_train, aes(x = lang_num, y = user_rating)) +
      geom_point(color = rgb(.2, .4, .2, .5))+
 geom_line(aes(x = lang, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+fit smoothing spline to user_rating_ver
+```{r}
+fit.ss <- smooth.spline(apple_train$user_rating_ver, # predictor (univariate)
+                        apple_train$user_rating)  # response
+fit.ss$df
+fit.ss$lambda # 0.05
+
+# look at the range
+ratelims <- range(apple_train$user_rating_ver)
+
+# create a sequence of observations 
+rate.grid <- seq(from = ratelims[1],to = ratelims[2])
+rate.grid
+pred.ss <- predict(fit.ss, x = rate.grid) # specify x; 
+# but we did not calculate CI in this function
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         rate = rate.grid)
+pred.ss.df
+
+ggplot(data = apple_train, aes(x = user_rating_ver, y = user_rating)) +
+     geom_point(color = rgb(.2, .4, .2, .5))+
+geom_line(aes(x = rate, y = pred), data = pred.ss.df,
           color = rgb(.8, .1, .1, 1)) + theme_bw()
 ```
 
 #### local regression
 
 ```{r}
-fit.loess <- loess(user_rating ~ size_bytes, data = apple[trRows,])
+fit.loess <- loess(user_rating ~ size_bytes, data = apple_train)
 summary(fit.loess)
 pred.loess <- predict(fit.loess, newdata = data.frame(size_bytes = size.grid))
 
@@ -606,24 +664,79 @@ p + geom_line(aes(x = size, y = pred), data = pred.loess.df,
 mgcv package
 ```{r}
 # Start with linear model; do not assume nonlinear trait
-gam.m1 <- gam(user_rating ~ size_bytes + price + rating_count_tot + rating_count_ver +
+gam.m1 <- gam(user_rating ~ size_bytes + price + 
                 user_rating_ver + cont_rating + prime_genre + sup_devices_num +
-                ipad_sc_urls_num + lang_num + vpp_lic , data = apple[trRows,]) 
+                ipad_sc_urls_num + lang_num , data = apple_train) 
 summary(gam.m1)
 
 # add one non-linear component to size bytes
-gam.m2 <- gam(user_rating ~ s(size_bytes) + price + rating_count_tot + rating_count_ver +
+gam.m2 <- gam(user_rating ~ s(size_bytes) + price +
                 user_rating_ver + cont_rating + prime_genre + sup_devices_num +
-                ipad_sc_urls_num + lang_num + vpp_lic , data = apple[trRows,])
+                ipad_sc_urls_num + lang_num, data = apple_train)
 summary(gam.m2) 
 
 #  add one non-linear component to lang_num
-gam.m3 <- gam(user_rating ~ s(size_bytes) + price + rating_count_tot + rating_count_ver +
+gam.m3 <- gam(user_rating ~ s(size_bytes) + price + 
                 user_rating_ver + cont_rating + prime_genre + sup_devices_num +
-                ipad_sc_urls_num + s(lang_num) + vpp_lic , data = apple[trRows,])
+                ipad_sc_urls_num + s(lang_num), data = apple_train)
 
-anova(gam.m1, gam.m2, gam.m3, test = "F")
+# add one non-linear component to user rating of current version
+gam.m4 <- gam(user_rating ~ s(size_bytes) + price + 
+                s(user_rating_ver) + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + s(lang_num), data = apple_train)
+
+anova(gam.m1, gam.m2, gam.m3, gam.m4, test = "F")
 ```
+
+plot smoothing component
+```{r}
+par(mfrow = c(1,3))
+plot(gam.m4)
+```
+
+use caret package to do gam
+```{r}
+ctrl1 <- trainControl(method = "cv", number = 10)
+# you can try other options
+
+set.seed(1234)
+gam.fit <- train(x_train, y_train,
+                 method = "gam", # use gam
+                 tuneGrid = data.frame(method = "GCV.Cp", select = c(TRUE,FALSE)),
+                 # two tuning parameters (but not real tuning paramteres from what we taught in class)
+                 # select = c(to do feature selection or not(set coeffcients to be zero or not), method is gcv from mgcv package)
+                 trControl = ctrl1)
+
+gam.fit$bestTune # by doing feature selection, get a better error in terms of MSE
+
+gam.fit$finalModel 
+```
+
+#### MARS
+
+```{r}
+library(pdp)
+library(earth)
+```
+
+```{r}
+mars_grid <- expand.grid(degree = 1:2,  # to include interaction or not
+                         nprune = 2:32) # how many variables you want to include
+mars_grid
+
+set.seed(1234)
+mars.fit <- train(x_train, y_train,
+                 method = "earth",
+                 tuneGrid = mars_grid,
+                 trControl = ctrl1)
+
+ggplot(mars.fit) # each line is for one degree;
+
+mars.fit$bestTune # model contains 3 variables with interaction terms
+
+coef(mars.fit$finalModel)
+```
+
 
 use logistic regression to fit the model
 can add penalty term on the regression model
