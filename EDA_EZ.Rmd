@@ -18,6 +18,7 @@ library(pls)
 library(glmnet)
 library(splines)
 library(mgcv)
+library(MASS)
 ```
 
 ## Prepare and clean data 
@@ -129,6 +130,14 @@ apple <- apple[, -nzv]
 combInfo <- findLinearCombos(apple[,-c(5,6)]) # on numerical values
 combInfo # no linear dependency problem
 names(apple) # remove vpp_lic; 8 predictors + 1 response
+```
+
+##Box-Cox Transformation
+```{r}
+apple = apple %>% 
+  mutate(user_rating_new = user_rating + 0.01)
+mult.fit1 <- lm(user_rating_new ~ size_bytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num + vpp_lic, data = apple) 
+boxcox(mult.fit1) 
 ```
 
 
