@@ -39,17 +39,6 @@ anyNA(apple) # no missing values
 str(apple) # select 11 covariables 
 ```
 
-Create train and test data
-```{r}
-set.seed(1234)
-trRows <- createDataPartition(apple$user_rating, # vector of outcomes
-                              p = .75, # percentage of training data (random assign)
-                              list = FALSE) # in a matrix form 
-apple_train <- apple[trRows,] # 5399 rows
-dim(apple_train)
-apple_test <- apple[-trRows,] # 1798 rows
-dim(apple_test)
-```
 
 Response: user_rating  
 
@@ -71,30 +60,31 @@ Predictors:
 
 Look variables distribution
 ```{r}
-summary(apple_train)
+summary(apple)
+
 # continuous variables
-hist(apple_train$size_bytes) # right skew
-hist(apple_train$size_bytes[apple_train$size_bytes < 1000]) # right skewed
-sum(apple_train$size_bytes < 1000) # 5213/5399 = 96% 
+hist(apple$size_bytes) # right skew
+hist(apple$size_bytes[apple$size_bytes < 1000]) # right skewed
+sum(apple$size_bytes < 1000) # 96%
 
-hist(apple_train$price)
-hist(apple_train$price[apple_train$price < 10])
-sum(apple_train$price < 10) # 5328/5399 = 99%
+hist(apple$price)
+hist(apple$price[apple$price < 10])
+sum(apple$price < 10) # 99%
 
-hist(apple_train$user_rating) # response
+hist(apple$user_rating) # response
 
-hist(apple_train$user_rating_ver) 
+hist(apple$user_rating_ver) 
 
-hist(apple_train$sup_devices_num)
-hist(apple_train$ipad_sc_urls_num)
-unique(apple_train$ipad_sc_urls_num) # 0,1,2,3,4,5
+hist(apple$sup_devices_num)
+hist(apple$ipad_sc_urls_num)
+unique(apple$ipad_sc_urls_num) # 0,1,2,3,4,5
 
-hist(apple_train$lang_num)
+hist(apple$lang_num)
 
-table(apple_train$cont_rating) # categorical
-table(apple_train$prime_genre) # categorical
-unique(apple_train$prime_genre)
-table(apple_train$vpp_lic) # binary
+table(apple$cont_rating) # categorical
+table(apple$prime_genre) # categorical
+unique(apple$prime_genre)
+table(apple$vpp_lic) # binary
 ```
 
 feature plot
@@ -107,17 +97,17 @@ theme1$plot.line$col <- rgb(.8, .1, .1, 1)
 theme1$plot.line$lwd <- 2
 theme1$strip.background$col <- rgb(.0, .2, .6, .2)
 trellis.par.set(theme1)
-featurePlot(apple_train[, -c(3,5,6)], apple_train$user_rating, plot = "scatter", labels = c("","Y"),
+featurePlot(apple[, -c(3,5,6)], apple$user_rating, plot = "scatter", labels = c("","Y"),
             type = c("p"), layout = c(4,2)) # plot numerical values
 dev.off()
 ```
 
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
-apple_train <- apple_train %>% select(user_rating, everything())
+apple <- apple %>% select(user_rating, everything())
 summary(apple)
 
-appleCor <-  cor(apple_train[-c(5,6)]) # correlation matrix of the modified dataset above
+appleCor <-  cor(apple[-c(5,6)]) # correlation matrix of the modified dataset above
 appleCor
 summary(appleCor[upper.tri(appleCor)]) # summary
 findCorrelation(appleCor, cutoff = .75)
@@ -125,8 +115,8 @@ appleCor
 
 appleCor > 0.75 # user rating (all version) and user rating (current version)
 
-x_train <- model.matrix(user_rating ~., data = apple_train)[,-1]
-corrplot::corrplot(cor(x_train), method = "circle",tl.cex = 0.5)
+x <- model.matrix(user_rating ~., data = apple)[,-1]
+corrplot::corrplot(cor(x), method = "circle",tl.cex = 0.5)
 ```
 
 Comment: correlation between covariates are not significant; user rating(response) and user rating version are highly correlated. (0.77)
@@ -134,15 +124,28 @@ Games, 4+ rating are oversampled
 
 check linear dependency of numerical predictors (no problematic predictors)
 ```{r}
-nzv <- nearZeroVar(apple_train) # nzv: near zero variance
-apple_train <- apple_train[, -nzv]
-combInfo <- findLinearCombos(apple_train[,-c(5,6)]) # on numerical values
+nzv <- nearZeroVar(apple) # nzv: near zero variance
+apple <- apple[, -nzv]
+combInfo <- findLinearCombos(apple[,-c(5,6)]) # on numerical values
 combInfo # no linear dependency problem
-names(apple_train) # remove vpp_lic
+names(apple) # remove vpp_lic; 8 predictors + 1 response
 ```
 
 
 ## split into train and test data
+
+Create train and test data
+```{r}
+set.seed(1234)
+trRows <- createDataPartition(apple$user_rating, # vector of outcomes
+                              p = .75, # percentage of training data (random assign)
+                              list = FALSE) # in a matrix form 
+apple_train <- apple[trRows,] # 5399 rows
+dim(apple_train)
+apple_test <- apple[-trRows,] # 1798 rows
+dim(apple_test)
+```
+
 
 ```{r}
 # predictor pool
@@ -152,32 +155,30 @@ dim(x)
 # response
 y <- apple$user_rating
 unique(y)
-```
 
-```{r}
-set.seed(1234)
-trRows <- createDataPartition(apple$user_rating, # vector of outcomes
-                              p = .75, # percentage of training data (random assign)
-                              list = FALSE) # in a matrix form 
-trRows
-
-# train data
-x_train <- model.matrix(user_rating ~., data = apple[trRows,])[,-1] 
-x_train
-dim(x_train) # 5759
-y_train <- apple[trRows,]$user_rating
+# train data design matrix
+x_train <- model.matrix(user_rating ~., data = apple_train)[,-1] 
+dim(x_train) # 5399 x 31
+y_train <- apple_train$user_rating
 unique(y_train)
 
 # test data
-x_test <- model.matrix(user_rating ~., data = apple[-trRows,])[,-1] 
-x_test
-dim(x_test) # 1438
+x_test <- model.matrix(user_rating ~., data = apple_test)[,-1] 
+dim(x_test) # 1798 x 31
 y_test <- apple[-trRows,]$user_rating
 unique(y_test)
 ```
 
 
-## Fit model
+## Fit model on train data
+
+### linear model
+
+```{r}
+linear.model <- lm(user_rating~., data = apple_train)
+summary(linear.model)
+```
+
 
 ### variable selection: ridge and lasso
 
@@ -189,6 +190,7 @@ use ridge regression from `glmnet` package
 ```{r}
 # ridge regression with 100 tuning parameter values (model formula)
 ridge.model <- glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-10, 6, length = 100)))
+plot(ridge.model, xvar = "lambda", label = TRUE)
 ```
 
 use 10 fold CV to select tuning para.
@@ -228,6 +230,7 @@ Lasso regression from `glmnet` package
 ```{r}
 # ridge regression with 100 tuning parameter values (model formula)
 lasso.model <- glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 100)))
+
 ```
 
 use 10 fold CV to select tuning para.
@@ -236,11 +239,12 @@ set.seed(1234)
 cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 100)), 
                       type.measure = "mse")
 plot(cv.lasso)
+plot(cv.lasso$glmnet.fit, xvar = "lambda", label=TRUE)
 
 # optimal lambda:
-cv.lasso$lambda.min # 0.013
+cv.lasso$lambda.min # 0.015
 # 1SE lambda:
-cv.lasso$lambda.1se # 0.077
+cv.lasso$lambda.1se # 0.09
 ```
 
 obtain coefficients of ridge model: optimal and sparse
@@ -272,7 +276,7 @@ set.seed(1234)
 ridge.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = 0,
                                           lambda = exp(seq(-10, 6, length = 100))),
-                   trControl = ctr1) # ?? warnings
+                   trControl = ctr1)
 
 lasso.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = 1,
@@ -285,7 +289,7 @@ plot(lasso.fit)
 look at model
 ```{r}
 ridge.fit$bestTune # 0.106
-lasso.fit$bestTune # 0.011 almost no penalty
+lasso.fit$bestTune # 0.013 almost no penalty
 
 # coefficients
 predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, type="coefficients")
@@ -301,8 +305,9 @@ enet.fit <- train(x_train, y_train, method = "glmnet",
                    trControl = ctr1)
 enet.fit$bestTune 
 plot(enet.fit) 
+enet.fit$preProcess
 ```
-comment: shows alpha = 1 (lasso) with lambda = 0.011 gives the lowest RMSE
+comment: shows alpha = 1 (lasso) with lambda = 0.015 gives the lowest RMSE
 
 compare between lasso, ridge, linear fit
 ```{r}
