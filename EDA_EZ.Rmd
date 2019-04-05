@@ -122,6 +122,11 @@ apple %>% group_by(cont_rating) %>%
   ungroup() %>% 
   mutate(cont_rating = forcats::fct_reorder(cont_rating, mean_rating)) %>% 
   ggplot(aes(x = cont_rating, y = user_rating)) + geom_boxplot()
+
+apple %>% group_by(cont_rating) %>% 
+  count(prime_genre) %>% 
+  ggplot(aes(x = cont_rating, y = n, fill = prime_genre)) + geom_bar(stat = "identity") +
+  theme(legend.position = "bottom")
 ```
 
 correlation plot excluding two factor variables : content rating and genre
