@@ -33,30 +33,15 @@ str(apple) # 7197 observations 17 variables (including response)
 unique(apple$currency) # all price on USD unit, so remove this
 
 apple <- apple %>% 
-  dplyr::select(-c(x1, track_name, id, currency, ver, rating_count_tot, rating_count_ver)) %>%
+  dplyr::select(-c(x1, track_name, id, currency, ver, rating_count_ver)) %>%
+  filter(rating_count_tot != 0) %>% 
+  dplyr::select(-rating_count_tot) %>% 
   mutate(size_bytes = round(size_bytes * 1e-6)) # convert to megabytes
 
 summary(apple)
 anyNA(apple) # no missing values
 str(apple) # select 11 covariables 
 ```
-
-
-Response: user_rating  
-
-__user_rating__: Average User Rating value (for all version)
-
-Predictors: 
-
-1.	size_bytes: Size (in Bytes)
-2.	price: Price amount ($)
-3.	user_rating_ver: Average User Rating value (for current version)
-4.	cont_rating: Content Rating
-5.	prime_genre: Primary Genre
-6.	sup_devices.num: Number of supporting devices
-7.	ipadSc_urls.num: Number of screenshots shown for display
-8.	lang.num: Number of supported languages
-9.	vpp_lic: Vpp Device Based Licensing Enabled
 
 ## EDA
 
@@ -132,15 +117,14 @@ apple %>% group_by(cont_rating) %>%
 correlation plot excluding two factor variables : content rating and genre
 ```{r}
 apple <- apple %>% dplyr::select(user_rating, everything())
-summary(apple)
+apple <- apple %>% 
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1 , 0)))
 
-appleCor <-  cor(apple[-c(5,6)]) # correlation matrix of the modified dataset above
+appleCor <-  cor(apple[-c(5)]) # correlation matrix of the modified dataset above
 appleCor
 summary(appleCor[upper.tri(appleCor)]) # summary
-findCorrelation(appleCor, cutoff = .75)
-appleCor
 
-appleCor > 0.75 # user rating (all version) and user rating (current version)
+appleCor > 0.48 # user rating (all version) and user rating (current version)
 
 x <- model.matrix(user_rating ~., data = apple)[,-1]
 
@@ -156,7 +140,7 @@ check linear dependency of numerical predictors (no problematic predictors)
 ```{r}
 nzv <- nearZeroVar(apple) # nzv: near zero variance
 apple <- apple[, -nzv]
-combInfo <- findLinearCombos(apple[,-c(5,6)]) # on numerical values
+combInfo <- findLinearCombos(apple[,-c(5)]) # on numerical values
 combInfo # no linear dependency problem
 names(apple) # remove vpp_lic; 8 predictors + 1 response
 ```
@@ -164,12 +148,8 @@ names(apple) # remove vpp_lic; 8 predictors + 1 response
 ## Box-Cox Transformation
 
 ```{r}
-apple <- apple %>% 
-  mutate(user_rating_new = ifelse(user_rating < 0.5, user_rating + 0.01, user_rating))
-mult.fit1 <- lm(user_rating_new ~ size_bytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num, data = apple) 
+mult.fit1 <- lm(user_rating ~ size_bytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num, data = apple) 
 boxcox(mult.fit1) 
-
-apple <- dplyr::select(apple, -user_rating_new)
 ```
 
 
@@ -181,9 +161,9 @@ set.seed(1234)
 trRows <- createDataPartition(apple$user_rating, # vector of outcomes
                               p = .75, # percentage of training data (random assign)
                               list = FALSE) # in a matrix form 
-apple_train <- apple[trRows,] # 5399 rows
+apple_train <- apple[trRows,] # 4702 rows
 dim(apple_train)
-apple_test <- apple[-trRows,] # 1798 rows
+apple_test <- apple[-trRows,] # 1566 rows
 dim(apple_test)
 ```
 
@@ -199,13 +179,13 @@ unique(y)
 
 # train data design matrix
 x_train <- model.matrix(user_rating ~., data = apple_train)[,-1] 
-dim(x_train) # 5399 x 31
+dim(x_train) # 5399 x 10
 y_train <- apple_train$user_rating
 unique(y_train)
 
 # test data
 x_test <- model.matrix(user_rating ~., data = apple_test)[,-1] 
-dim(x_test) # 1798 x 31
+dim(x_test) # 1798 x 10
 y_test <- apple[-trRows,]$user_rating
 unique(y_test)
 ```
@@ -244,9 +224,9 @@ cv.ridge <- cv.glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-10, 6, leng
 plot(cv.ridge)
 
 # optimal lambda:
-cv.ridge$lambda.min # 0.013
+cv.ridge$lambda.min # 0.009
 # 1SE lambda:
-cv.ridge$lambda.1se # 0.2027
+cv.ridge$lambda.1se # 0.3869
 ```
 
 obtain coefficients of ridge model: optimal and sparse
@@ -271,7 +251,6 @@ Lasso regression from `glmnet` package
 ```{r}
 # ridge regression with 100 tuning parameter values (model formula)
 lasso.model <- glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 100)))
-
 ```
 
 use 10 fold CV to select tuning para.
@@ -283,9 +262,10 @@ plot(cv.lasso)
 plot(cv.lasso$glmnet.fit, xvar = "lambda", label=TRUE)
 
 # optimal lambda:
-cv.lasso$lambda.min # 0.015
+cv.lasso$lambda.min # 0.003
 # 1SE lambda:
-cv.lasso$lambda.1se # 0.09
+cv.lasso$lambda.1se # 0.077
+coef(cv.lasso)
 ```
 
 obtain coefficients of ridge model: optimal and sparse
@@ -323,14 +303,15 @@ lasso.fit <- train(x_train, y_train, method = "glmnet",
                    tuneGrid = expand.grid(alpha = 1,
                                           lambda = exp(seq(-10, 6, length = 100))),
                    trControl = ctr1)
-plot(ridge.fit)
-plot(lasso.fit)
+plot(ridge.fit, xTrans = function(x) log(x))
+plot(lasso.fit, xTrans = function(x) log(x))
 ```
 
 look at model
 ```{r}
 ridge.fit$bestTune # 0.106
-lasso.fit$bestTune # 0.013 almost no penalty
+lasso.fit$bestTune # 0.0023 almost no penalty
+lasso.fit$finalModel
 
 # coefficients
 predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, type="coefficients")
@@ -344,11 +325,11 @@ enet.fit <- train(x_train, y_train, method = "glmnet",
                    tuneGrid = expand.grid(alpha = seq(0, 1, length = 5),
                                           lambda = exp(seq(-10, 6, length = 100))),
                    trControl = ctr1)
-enet.fit$bestTune 
-plot(enet.fit) 
+enet.fit$bestTune # 
+plot(enet.fit) # figure
 enet.fit$preProcess
 ```
-comment: shows alpha = 1 (lasso) with lambda = 0.015 gives the lowest RMSE
+comment: shows alpha = 0.75 with lambda = 0.005 gives the lowest RMSE
 
 compare between lasso, ridge, linear fit
 ```{r}
@@ -357,7 +338,6 @@ lm.fit <- train(x_train, y_train, method = "lm", trControl = ctr1)
 
 resamp <- resamples(list(ridge = ridge.fit, lasso = lasso.fit, lm = lm.fit))
 summary(resamp)
-parallelplot(resamp, metric = "RMSE")
 bwplot(resamp, metric = "RMSE")
 ```
 
@@ -384,7 +364,7 @@ PCR:
 set.seed(1234)
 pcr.fit <- train(x_train, y_train,
                   method = "pcr",
-                  tuneLength = 34,
+                  tuneLength = 10,
                   trControl = ctr1,
                   scale = TRUE) 
 
@@ -400,7 +380,7 @@ PLS:
 set.seed(1234)
 pls.fit <- train(x_train, y_train,
                   method = "pls",
-                  tuneLength = 34,
+                  tuneLength = 10,
                   trControl = ctr1,
                   scale = TRUE) 
 
@@ -435,25 +415,25 @@ CV to compare models up to d = 4 and make plot
 
 add higher order on size_bytes
 ```{r}
-ctrl2 <- trainControl(method = "cv", number = 10)
+# ctrl2 <- trainControl(method = "cv", number = 10)
 
 set.seed(1234)
 lmFit1 <- train(user_rating ~ size_bytes,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2) 
+                trControl = ctrl1) 
 lmFit2 <- train(user_rating ~ poly(size_bytes,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit3 <- train(user_rating ~ poly(size_bytes,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit4 <- train(user_rating ~ poly(size_bytes,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -469,19 +449,19 @@ set.seed(1234)
 lmFit1 <- train(user_rating ~ price,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2) 
+                trControl = ctrl1) 
 lmFit2 <- train(user_rating ~ poly(price,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit3 <- train(user_rating ~ poly(price,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit4 <- train(user_rating ~ poly(price,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -496,19 +476,19 @@ set.seed(1234)
 lmFit1 <- train(user_rating ~ user_rating_ver,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2) 
+                trControl = ctrl1) 
 lmFit2 <- train(user_rating ~ poly(user_rating_ver,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit3 <- train(user_rating ~ poly(user_rating_ver,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit4 <- train(user_rating ~ poly(user_rating_ver,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -524,19 +504,19 @@ set.seed(1234)
 lmFit1 <- train(user_rating ~ lang_num,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2) 
+                trControl = ctrl1) 
 lmFit2 <- train(user_rating ~ poly(lang_num,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit3 <- train(user_rating ~ poly(lang_num,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 lmFit4 <- train(user_rating ~ poly(lang_num,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl2)
+                trControl = ctrl1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -699,17 +679,14 @@ par(mfrow = c(1,3))
 plot(gam.m4)
 ```
 
-use caret package to do gam
+use caret package to do gam???
 ```{r}
-ctrl1 <- trainControl(method = "cv", number = 10)
 # you can try other options
 
 set.seed(1234)
 gam.fit <- train(x_train, y_train,
                  method = "gam", # use gam
                  tuneGrid = data.frame(method = "GCV.Cp", select = c(TRUE,FALSE)),
-                 # two tuning parameters (but not real tuning paramteres from what we taught in class)
-                 # select = c(to do feature selection or not(set coeffcients to be zero or not), method is gcv from mgcv package)
                  trControl = ctrl1)
 
 gam.fit$bestTune # by doing feature selection, get a better error in terms of MSE
@@ -726,8 +703,9 @@ library(earth)
 
 ```{r}
 mars_grid <- expand.grid(degree = 1:2,  # to include interaction or not
-                         nprune = 2:32) # how many variables you want to include
+                         nprune = 2:11) # how many variables you want to include
 mars_grid
+
 
 set.seed(1234)
 mars.fit <- train(x_train, y_train,
@@ -750,3 +728,35 @@ gam for logistic regression
 DALEX package
 
 can use naive bayes for both quantitative and qualitative variables
+
+## Compare between models
+
+```{r}
+resamp <- resamples(list(lasso = lasso.fit,
+                         lm = lm.fit,
+                         pcr = pcr.fit,
+                         pls = pls.fit,
+                         mars = mars.fit))
+
+summary(resamp)
+bwplot(resamp, metric = "RMSE")
+```
+
+select MARS model
+
+```{r}
+pred.elast <- predict(enet.fit$finalModel, newx = x_test, type = "response")
+mean((pred.elast - y_test)^2) # 0.42
+pred.mars <- predict(mars.fit$finalModel, newdata = x_test, type = "response")
+mean((pred.mars - y_test)^2) # 0.283
+pred.lasso <- predict(lasso.fit$finalModel, newx = x_test, type = "response")
+mean((pred.lasso - y_test)^2) # 0.42
+pred.pcr <- predict(pcr.fit$finalModel, newdata = x_test, type = "response")
+mean((pred.pcr - y_test)^2) # 0.45
+pred.pls <- predict(pls.fit$finalModel, newdata = x_test, type = "response")
+mean((pred.pls - y_test)^2) # 0.41
+pred.lm <- predict(lm.fit, newdata = x_test)
+mean((pred.lm - y_test)^2) # 0.41
+```
+
+
