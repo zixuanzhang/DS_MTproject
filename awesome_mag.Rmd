@@ -171,7 +171,7 @@ set.seed(1234)
 enet.fit <- train(x_train, y_train,
                      method = "glmnet",
                      tuneGrid = expand.grid(alpha = seq(0, 1, length = 5), 
-                                            lambda = exp(seq(-10, 6, length = 50))),
+                                            lambda = exp(seq(-8, 2, length = 50))),
                      trControl = ctrl1)
 enet.fit$bestTune
 
