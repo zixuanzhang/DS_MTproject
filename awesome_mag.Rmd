@@ -51,9 +51,7 @@ apple %>%
   geom_histogram()
 
 #Correlation (no cont_rating, prime_genre)
-cor_matrix = apple %>%
-  select(-cont_rating, -prime_genre, -user_rating) %>%
-  as.matrix()
+cor_matrix = model.matrix(user_rating ~., data = apple)[,-1]
 corrplot::corrplot(cor(cor_matrix))
 
 #Scatterplots
@@ -234,7 +232,7 @@ gam.fit$finalModel
 library(pdp)
 library(earth)
 mars_grid <- expand.grid(degree = 1:2,  # to include interaction or not
-                         nprune = 2:32) # how many variables you want to include
+                         nprune = 2:11) # how many variables you want to include
 mars_grid
 
 set.seed(1234)
@@ -257,6 +255,18 @@ bwplot(resamples(list(#gam = gam.fit,
                       mars = mars.fit,
                       ridge = ridge.fit,
                       lasso = lasso.fit,
+                      enet = enet.fit,
+                      pcr = pcr.fit,
+                      pls = pls.fit)), metric = "RMSE")
+```
+
+```{r}
+summary(resamples(list(#gam = gam.fit,
+                      lm = lm.fit,
+                      mars = mars.fit,
+                      ridge = ridge.fit,
+                      lasso = lasso.fit,
+                      enet = enet.fit,
                       pcr = pcr.fit,
                       pls = pls.fit)), metric = "RMSE")
 ```
