@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(caret)
 library(glmnet)
+library(mgcv)
 ```
 
 ##Tidy data
@@ -18,7 +19,10 @@ apple = read_csv("./data/AppleStore.csv") %>%
   janitor::clean_names() %>%
   dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
   mutate(size_bytes = round(size_bytes * 1e-6)) %>%
-  rename(size_megabytes = size_bytes)
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
 
 skimr::skim(apple)
 
@@ -182,7 +186,7 @@ ggplot(enet.fit)
 set.seed(1234)
 pcr.fit <- train(x_train, y_train,
                   method = "pcr",
-                  tuneLength = 34,
+                  tuneLength = 10,
                   trControl = ctrl1,
                   scale = TRUE) 
 
@@ -197,7 +201,7 @@ ggplot(pcr.fit, highlight = TRUE) + theme_bw()
 set.seed(1234)
 pls.fit <- train(x_train, y_train,
                   method = "pls",
-                  tuneLength = 34,
+                  tuneLength = 10,
                   trControl = ctrl1,
                   scale = TRUE) 
 
