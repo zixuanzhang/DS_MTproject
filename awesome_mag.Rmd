@@ -1,0 +1,259 @@
+---
+title: "awesome_mag"
+author: "Bingyu Sun"
+date: "4/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(glmnet)
+```
+
+##Tidy data
+```{r}
+apple = read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6)) %>%
+  rename(size_megabytes = size_bytes)
+
+skimr::skim(apple)
+
+#matrix of predictors
+x = model.matrix(user_rating~., apple)[,-1]
+y = apple$user_rating
+```
+
+##EDA
+```{r}
+#boxplots for categorical variables
+apple %>%
+  mutate(cont_rating = forcats::fct_reorder(cont_rating, user_rating)) %>% 
+  ggplot(aes(x = cont_rating, y = user_rating)) + 
+  geom_boxplot()
+
+apple %>%
+  mutate(prime_genre = forcats::fct_reorder(prime_genre, user_rating)) %>% 
+  ggplot(aes(x = prime_genre, y = user_rating)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#histograms for response
+apple %>% 
+  ggplot(aes(x = user_rating)) +
+  geom_histogram()
+
+#Correlation (no cont_rating, prime_genre)
+cor_matrix = apple %>%
+  select(-cont_rating, -prime_genre, -user_rating) %>%
+  as.matrix()
+corrplot::corrplot(cor(cor_matrix))
+
+#Scatterplots
+apple %>% 
+  ggplot(aes(x = rating_count_tot, y = user_rating)) +
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+
+apple %>% 
+  ggplot(aes(x = rating_count_ver, y = user_rating)) +
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+
+apple %>% 
+  ggplot(aes(x = size_megabytes, y = user_rating)) +
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+
+apple %>% 
+  ggplot(aes(x = price, y = user_rating)) +
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+
+apple %>% 
+  select(-cont_rating, -prime_genre) %>%
+  select(user_rating, user_rating_ver, ipad_sc_urls_num, vpp_lic) %>%
+  gather(key = variables, value = x, user_rating_ver:vpp_lic) %>% 
+  ggplot(aes(x = x, y = user_rating)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm") +
+  facet_grid(~variables)
+
+apple %>% 
+  select(-cont_rating, -prime_genre) %>%
+  select(user_rating, sup_devices_num, lang_num) %>%
+  gather(key = variables, value = x, sup_devices_num:lang_num) %>% 
+  ggplot(aes(x = x, y = user_rating)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm") +
+  facet_grid(~variables)
+```
+
+##Fit linear regression & 10-fold repeatedCV (5 times)
+```{r}
+set.seed(1234)
+#Split data to traning and testing
+trRows = createDataPartition(apple$user_rating,
+                             p = .75,
+                             list = FALSE)
+train_data = apple[trRows,]
+test_data = apple[-trRows,]
+#in matrix form
+x_train = model.matrix(user_rating~., train_data)[,-1] 
+y_train = train_data$user_rating
+x_test = model.matrix(user_rating~., test_data)[,-1] 
+y_test = test_data$user_rating
+
+ctrl1 = trainControl(method = "repeatedcv", number = 10, repeats = 5)
+
+set.seed(1234)
+lm.fit = train(user_rating~.,
+               data = train_data,
+               method = "lm",
+               trControl = ctrl1)
+lm.fit #RMSE 0.9506196
+```
+
+##Ridge, Lasso, and elastic net
+
+####Ridge
+```{r}
+# fit the ridge regression (alpha = 0) with a sequence of lambdas
+ridge.mod = glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-8, 2, length = 100)))
+dim(coef(ridge.mod))
+
+#CV: get optimal lambda
+set.seed(1234)
+cv.ridge = cv.glmnet(x_train, y_train, 
+                      alpha = 0, 
+                      lambda = exp(seq(-8, 2, length = 100)), 
+                      type.measure = "mse")
+plot(cv.ridge)
+
+cv.ridge$lambda.min
+```
+
+####Lasso (variable selection)
+```{r}
+cv.lasso = cv.glmnet(x_train, y_train, 
+                     alpha = 1, 
+                     lambda = exp(seq(-6, 5, length = 100)))
+plot(cv.lasso)
+cv.lasso$lambda.min #optimal lambda
+
+predict(cv.lasso, s = "lambda.min", type = "coefficients")
+```
+
+####Use Caret (ridge and lasso)
+```{r}
+set.seed(1234)
+ridge.fit <- train(x_train, y_train, method = "glmnet", 
+                   tuneGrid = expand.grid(alpha = 0,
+                                          lambda = exp(seq(-8, 2, length = 100))),
+                   trControl = ctrl1)
+
+lasso.fit <- train(x_train, y_train, method = "glmnet", 
+                   tuneGrid = expand.grid(alpha = 1,
+                                          lambda = exp(seq(-6, 2, length = 100))),
+                   trControl = ctrl1)
+plot(ridge.fit, xTrans = function(x) log(x))
+plot(lasso.fit, xTrans = function(x) log(x))
+```
+
+####Elastic net
+```{r}
+set.seed(1234)
+enet.fit <- train(x_train, y_train,
+                     method = "glmnet",
+                     tuneGrid = expand.grid(alpha = seq(0, 1, length = 5), 
+                                            lambda = exp(seq(-10, 6, length = 50))),
+                     trControl = ctrl1)
+enet.fit$bestTune
+
+ggplot(enet.fit)
+```
+
+##PCR and PLS
+####PCR
+```{r}
+set.seed(1234)
+pcr.fit <- train(x_train, y_train,
+                  method = "pcr",
+                  tuneLength = 34,
+                  trControl = ctrl1,
+                  scale = TRUE) 
+
+pred.pcr <- predict(pcr.fit$finalModel, newdata = x_test,
+                       ncomp = pcr.fit$bestTune[[1]]) #33
+mean((pred.pcr - y_test)^2) #0.83
+ggplot(pcr.fit, highlight = TRUE) + theme_bw()
+```
+
+####PLS
+```{r}
+set.seed(1234)
+pls.fit <- train(x_train, y_train,
+                  method = "pls",
+                  tuneLength = 34,
+                  trControl = ctrl1,
+                  scale = TRUE) 
+
+pred.pls <- predict(pls.fit$finalModel, newdata = x_test,
+                       ncomp = pls.fit$bestTune[[1]]) # 32
+mean((pred.pls - y_test)^2) # 0.83
+
+ggplot(pls.fit, highlight = TRUE) + theme_bw()
+```
+
+##Non-linear
+
+####GAM
+```{r}
+set.seed(1234)
+gam.fit <- train(x_train, y_train,
+                 method = "gam", # use gam
+                 tuneGrid = data.frame(method = "GCV.Cp", select = c(TRUE,FALSE)),
+                 # two tuning parameters (but not real tuning paramteres from what we taught in class)
+                 # select = c(to do feature selection or not(set coeffcients to be zero or not), method is gcv from mgcv package)
+                 trControl = ctrl1)
+
+gam.fit$bestTune # by doing feature selection, get a better error in terms of MSE
+
+gam.fit$finalModel 
+```
+
+####MARS
+```{r}
+library(pdp)
+library(earth)
+mars_grid <- expand.grid(degree = 1:2,  # to include interaction or not
+                         nprune = 2:32) # how many variables you want to include
+mars_grid
+
+set.seed(1234)
+mars.fit <- train(x_train, y_train,
+                 method = "earth",
+                 tuneGrid = mars_grid,
+                 trControl = ctrl1)
+
+ggplot(mars.fit) # each line is for one degree;
+
+mars.fit$bestTune # model contains 3 variables with interaction terms
+
+coef(mars.fit$finalModel)
+```
+
+####Boxplot
+```{r}
+bwplot(resamples(list(#gam = gam.fit,
+                      lm = lm.fit,
+                      mars = mars.fit,
+                      ridge = ridge.fit,
+                      lasso = lasso.fit,
+                      pcr = pcr.fit,
+                      pls = pls.fit)), metric = "RMSE")
+```
+
