@@ -250,6 +250,7 @@ coef(mars.fit$finalModel)
 
 ####Boxplot
 ```{r}
+jpeg("rmse.jpg")
 bwplot(resamples(list(#gam = gam.fit,
                       lm = lm.fit,
                       mars = mars.fit,
@@ -258,6 +259,7 @@ bwplot(resamples(list(#gam = gam.fit,
                       enet = enet.fit,
                       pcr = pcr.fit,
                       pls = pls.fit)), metric = "RMSE")
+dev.off()
 ```
 
 ```{r}
