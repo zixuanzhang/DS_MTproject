@@ -129,8 +129,8 @@ appleCor > 0.48 # user rating (all version) and user rating (current version)
 x <- model.matrix(user_rating ~., data = apple)[,-1]
 
 #jpeg('corr_plot.jpg')
-corrplot::corrplot(cor(x), method = "circle",tl.cex = 0.5)
-#dev.off()
+corrplot::corrplot(cor(x), method = "circle",tl.cex = 0.6)
+dev.off()
 ```
 
 Comment: correlation between covariates are not significant; user rating(response) and user rating version are highly correlated. (0.77)
@@ -675,8 +675,10 @@ anova(gam.m1, gam.m2, gam.m3, gam.m4, test = "F")
 
 plot smoothing component
 ```{r}
+jpeg("smoothing.spline.jpg")
 par(mfrow = c(1,3))
 plot(gam.m4)
+dev.off()
 ```
 
 use caret package to do gam???
