@@ -250,7 +250,7 @@ coef(mars.fit$finalModel)
 
 ####Boxplot
 ```{r}
-jpeg("rmse.jpg")
+#jpeg("rmse.jpg")
 bwplot(resamples(list(#gam = gam.fit,
                       lm = lm.fit,
                       mars = mars.fit,
@@ -259,7 +259,7 @@ bwplot(resamples(list(#gam = gam.fit,
                       enet = enet.fit,
                       pcr = pcr.fit,
                       pls = pls.fit)), metric = "RMSE")
-dev.off()
+#dev.off()
 ```
 
 ```{r}
@@ -287,7 +287,7 @@ pred.pls <- predict(pls.fit$finalModel, newdata = x_test, type = "response")
 mean((pred.pls - y_test)^2) # 0.410
 pred.lm <- predict(lm.fit, newdata = data.frame(x_test))
 mean((pred.lm - y_test)^2) # 0.41??
-pred.ridge <- predict(ridge.fit, newdata = x_test)
-mean((pred.ridge - y_test)^2) # 0.406
+pred.ridge <- predict(ridge.fit$finalModel, newx = x_test, type = "response")
+mean((pred.ridge - y_test)^2) # 0.469
 ```
 
