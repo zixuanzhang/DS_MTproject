@@ -1,8 +1,10 @@
 ---
-title: "awesome_mag"
+title: "Group5 Code"
 author: "Bingyu Sun"
 date: "4/4/2019"
-output: html_document
+output: 
+  pdf_document:
+    latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
@@ -15,6 +17,15 @@ library(mgcv)
 
 ##Tidy data
 ```{r}
+apple_with_vpp = read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6)) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver) #with vpp_lic
+
 apple = read_csv("./data/AppleStore.csv") %>%
   janitor::clean_names() %>%
   dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
@@ -32,7 +43,7 @@ y = apple$user_rating
 ```
 
 ##EDA
-```{r}
+```{r, eval = FALSE}
 #boxplots for categorical variables
 apple %>%
   mutate(cont_rating = forcats::fct_reorder(cont_rating, user_rating)) %>% 
@@ -40,6 +51,7 @@ apple %>%
   geom_boxplot()
 
 apple %>%
+  mutate(prime_genre = as.factor(prime_genre)) %>% 
   mutate(prime_genre = forcats::fct_reorder(prime_genre, user_rating)) %>% 
   ggplot(aes(x = prime_genre, y = user_rating)) + 
   geom_boxplot() +
@@ -75,7 +87,7 @@ apple %>%
   geom_point(alpha = .5) +
   stat_smooth(method = "lm")
 
-apple %>% 
+apple_with_vpp %>% 
   select(-cont_rating, -prime_genre) %>%
   select(user_rating, user_rating_ver, ipad_sc_urls_num, vpp_lic) %>%
   gather(key = variables, value = x, user_rating_ver:vpp_lic) %>% 
@@ -94,7 +106,41 @@ apple %>%
   facet_grid(~variables)
 ```
 
-##Fit linear regression & 10-fold repeatedCV (5 times)
+####Feature plot
+```{r}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.line$col <- rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+featurePlot(apple_with_vpp[, -c(3,5,6)], apple$user_rating, plot = "scatter", labels = c("","Y"),
+            type = c("p"), layout = c(4,2)) # plot numerical values
+```
+
+####Correlation (no content rating and primary genre)
+```{r}
+cor_matrix = model.matrix(user_rating ~., data = apple)[,-1]
+corrplot::corrplot(cor(cor_matrix))
+```
+
+####Check linear dependency of numerical predictors (no problematic predictors)
+```{r}
+nzv <- nearZeroVar(apple_with_vpp) # nzv: near zero variance
+apple_2 <- apple_with_vpp[, -nzv]
+combInfo <- findLinearCombos(apple_2[,-c(5)]) # on numerical values
+combInfo # no linear dependency problem
+names(apple_2) # remove vpp_lic; 8 predictors + 1 response
+```
+
+####Box-cox
+```{r, eval=FALSE}
+mult.fit1 <- lm(user_rating ~ size_megabytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num, data = apple) 
+boxcox(mult.fit1) 
+```
+
+##Split to train/test sets
 ```{r}
 set.seed(1234)
 #Split data to traning and testing
@@ -110,7 +156,10 @@ x_test = model.matrix(user_rating~., test_data)[,-1]
 y_test = test_data$user_rating
 
 ctrl1 = trainControl(method = "repeatedcv", number = 10, repeats = 5)
+```
 
+##Fit linear regression & 10-fold repeatedCV (5 times)
+```{r}
 set.seed(1234)
 lm.fit = train(user_rating~.,
                data = train_data,
@@ -123,7 +172,7 @@ summary(lm.fit)
 ##Ridge, Lasso, and elastic net
 
 ####Ridge
-```{r}
+```{r, eval=FALSE}
 # fit the ridge regression (alpha = 0) with a sequence of lambdas
 ridge.mod = glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-8, 2, length = 100)))
 dim(coef(ridge.mod))
@@ -140,7 +189,7 @@ cv.ridge$lambda.min
 ```
 
 ####Lasso (variable selection)
-```{r}
+```{r, eval=FALSE}
 cv.lasso = cv.glmnet(x_train, y_train, 
                      alpha = 1, 
                      lambda = exp(seq(-6, 2, length = 100)))
@@ -166,6 +215,8 @@ plot(ridge.fit, xTrans = function(x) log(x))
 plot(lasso.fit, xTrans = function(x) log(x))
 ridge.fit$bestTune #0.03
 lasso.fit$bestTune #0.005
+
+coef(lasso.fit$finalModel, lasso.fit$bestTune$lambda) #get covariates
 ```
 
 ####Elastic net
@@ -215,8 +266,245 @@ ggplot(pls.fit, highlight = TRUE) + theme_bw()
 
 ##Non-linear
 
-####GAM
+#### Polynomials
+
+CV to compare models up to d = 4 and make plot
+
+add higher order on size_megabytes
 ```{r}
+set.seed(1234)
+lmFit1 <- train(user_rating ~ size_megabytes,
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1) 
+lmFit2 <- train(user_rating ~ poly(size_megabytes,2),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+lmFit3 <- train(user_rating ~ poly(size_megabytes,3),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+lmFit4 <- train(user_rating ~ poly(size_megabytes,4),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+#summary(resamp) # RMSE
+
+bwplot(resamp, metric = "RMSE")
+```
+comment: d = 1
+
+add higher order on  user_rating_ver
+```{r}
+set.seed(1234)
+lmFit1 <- train(user_rating ~ user_rating_ver,
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1) 
+lmFit2 <- train(user_rating ~ poly(user_rating_ver,2),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+lmFit3 <- train(user_rating ~ poly(user_rating_ver,3),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+lmFit4 <- train(user_rating ~ poly(user_rating_ver,4),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+#summary(resamp) # MSE
+
+bwplot(resamp, metric = "RMSE")
+```
+Comment: d = 3 on user_rating_ver
+
+add higher order on lang_num
+```{r}
+set.seed(1234)
+lmFit1 <- train(user_rating ~ lang_num,
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1) 
+lmFit2 <- train(user_rating ~ poly(lang_num,2),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+lmFit3 <- train(user_rating ~ poly(lang_num,3),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+lmFit4 <- train(user_rating ~ poly(lang_num,4),
+                data = train_data, 
+                method = "lm",
+                trControl = ctrl1)
+
+resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
+#summary(resamp) # MSE
+
+bwplot(resamp, metric = "RMSE")
+```
+Conclusion: add polynomial component of lang_num and size_megabytes does not make too much difference
+
+Comment: it does not really improve too much; so better keep d = 1
+
+check anova
+```{r}
+fit1 <- lm(user_rating~size_megabytes, data = train_data)  # y ~ X 
+fit2 <- lm(user_rating~poly(size_megabytes,2), data = train_data) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(size_megabytes,3), data = train_data) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(size_megabytes,4), data = train_data) # y ~ X + X^2 + X^3 + X^4
+anova(fit1, fit2, fit3, fit4)
+
+fit1 <- lm(user_rating~user_rating_ver, data = train_data)  # y ~ X 
+fit2 <- lm(user_rating~poly(user_rating_ver,2), data = train_data) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(user_rating_ver,3), data = train_data) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(user_rating_ver,4), data = train_data) # y ~ X + X^2 + X^3 + X^4
+anova(fit1, fit2, fit3, fit4)
+
+fit1 <- lm(user_rating~lang_num, data = train_data)  # y ~ X 
+fit2 <- lm(user_rating~poly(lang_num,2), data = train_data) # y ~ X + X^2
+fit3 <- lm(user_rating~poly(lang_num,3), data = train_data) # y ~ X + X^2 + X^3
+fit4 <- lm(user_rating~poly(lang_num,4), data = train_data)
+anova(fit1, fit2, fit3, fit4)
+```
+Comment: ANOVA result suggest adding d = 3 to lang_num and d = 4 on size_megabytes
+How to decide on this?
+
+#### Smoothing splines
+
+fit smoothing spline on size_megabytes
+```{r}
+p <- ggplot(data = train_data, aes(x = size_megabytes, y = user_rating)) +
+     geom_point(color = rgb(.2, .4, .2, .5))
+p
+
+fit.ss <- smooth.spline(train_data$size_megabytes, # predictor (univariate)
+                        train_data$user_rating)  # response
+fit.ss$df # 14.5
+
+# look at the range
+sizelims <- range(apple$size_megabytes)
+
+# create a sequence of observations pgg45
+size.grid <- seq(from = sizelims[1],to = sizelims[2], 100)
+
+pred.ss <- predict(fit.ss, x = size.grid) # specify x; 
+# but we did not calculate CI in this function
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         size = size.grid)
+
+p +
+geom_line(aes(x = size, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1)) + theme_bw()
+
+```
+
+fit smoothing spline to lang_num
+```{r}
+fit.ss <- smooth.spline(train_data$lang_num, # predictor (univariate)
+                        train_data$user_rating)  # response
+fit.ss$df 
+
+# look at the range
+langlims <- range(train_data$lang_num)
+
+# create a sequence of observations pgg45
+lang.grid <- seq(from = langlims[1],to = langlims[2])
+lang.grid
+pred.ss <- predict(fit.ss, x = lang.grid) # specify x; 
+# but we did not calculate CI in this function
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         lang = lang.grid)
+pred.ss.df
+
+ggplot(data = train_data, aes(x = lang_num, y = user_rating)) +
+     geom_point(color = rgb(.2, .4, .2, .5))+
+geom_line(aes(x = lang, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+fit smoothing spline to user_rating_ver
+```{r}
+fit.ss <- smooth.spline(train_data$user_rating_ver, # predictor (univariate)
+                        train_data$user_rating)  # response
+fit.ss$df
+fit.ss$lambda # 0.05
+
+# look at the range
+ratelims <- range(train_data$user_rating_ver)
+
+# create a sequence of observations 
+rate.grid <- seq(from = ratelims[1],to = ratelims[2])
+rate.grid
+pred.ss <- predict(fit.ss, x = rate.grid) # specify x; 
+# but we did not calculate CI in this function
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         rate = rate.grid)
+pred.ss.df
+
+ggplot(data = train_data, aes(x = user_rating_ver, y = user_rating)) +
+     geom_point(color = rgb(.2, .4, .2, .5))+
+geom_line(aes(x = rate, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+#### local regression
+
+```{r}
+fit.loess <- loess(user_rating ~ size_megabytes, data = train_data)
+summary(fit.loess)
+pred.loess <- predict(fit.loess, newdata = data.frame(size_megabytes = size.grid))
+
+pred.loess.df <- data.frame(pred = pred.loess,
+                            size = size.grid)
+
+p + geom_line(aes(x = size, y = pred), data = pred.loess.df,
+              color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+####GAM
+
+mgcv package
+```{r}
+# Start with linear model; do not assume nonlinear trait
+gam.m1 <- gam(user_rating ~ size_megabytes + price + 
+                user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + lang_num , data = train_data) 
+summary(gam.m1)
+
+# add one non-linear component to size bytes
+gam.m2 <- gam(user_rating ~ s(size_megabytes) + price +
+                user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + lang_num, data = train_data)
+summary(gam.m2) 
+
+#  add one non-linear component to lang_num
+gam.m3 <- gam(user_rating ~ s(size_megabytes) + price + 
+                user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + s(lang_num), data = train_data)
+
+# add one non-linear component to user rating of current version
+gam.m4 <- gam(user_rating ~ s(size_megabytes) + price + 
+                s(user_rating_ver) + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + s(lang_num), data = train_data)
+
+anova(gam.m1, gam.m2, gam.m3, gam.m4, test = "F")
+```
+
+plot smoothing component
+```{r}
+par(mfrow = c(1,3))
+plot(gam.m4)
+```
+
+use caret package to do gam
+```{r, eval=FALSE}
 set.seed(1234)
 gam.fit <- train(x_train, y_train,
                  method = "gam", # use gam
@@ -251,7 +539,7 @@ mars.fit$bestTune # model contains 3 variables with interaction terms
 coef(mars.fit$finalModel)
 ```
 
-####Boxplot
+####Compare models
 ```{r}
 #jpeg("rmse.jpg")
 bwplot(resamples(list(#gam = gam.fit,
@@ -278,19 +566,20 @@ summary(resamples(list(#gam = gam.fit,
 
 ####Test MSE
 ```{r}
-pred.elast <- predict(enet.fit$finalModel, newx = x_test, type = "response")
-mean((pred.elast - y_test)^2) # 0.419
+pred.elast <- predict(enet.fit$finalModel, newx = x_test, s = enet.fit$bestTune$lambda, type = "response")
+mean((pred.elast - y_test)^2) # 0.407
 pred.mars <- predict(mars.fit$finalModel, newdata = x_test, type = "response")
 mean((pred.mars - y_test)^2) # 0.283
-pred.lasso <- predict(lasso.fit$finalModel, newx = x_test, type = "response")
-mean((pred.lasso - y_test)^2) # 0.419
+pred.lasso <- predict(lasso.fit$finalModel, newx = x_test, s = lasso.fit$bestTune$lambda, type = "response")
+mean((pred.lasso - y_test)^2) # 0.407
 pred.pcr <- predict(pcr.fit$finalModel, newdata = x_test, ncomp = pcr.fit$bestTune[[1]], type = "response")
 mean((pred.pcr - y_test)^2) # 0.407
 pred.pls <- predict(pls.fit$finalModel, newdata = x_test, ncomp = pls.fit$bestTune$ncomp, type = "response")
 mean((pred.pls - y_test)^2) # 0.406
-pred.lm <- predict(lm.fit, newdata = data.frame(x_test))
-mean((pred.lm - y_test)^2) # 0.41??
-pred.ridge <- predict(ridge.fit$finalModel, newx = x_test, type = "response")
-mean((pred.ridge - y_test)^2) # 0.469
+
+#pred.lm <- predict(lm.fit$finalModel, newdata = x_test)
+#mean((pred.lm - y_test)^2) # 0.41??
+pred.ridge <- predict(ridge.fit$finalModel, newx = x_test, s = ridge.fit$bestTune$lambda, type = "response")
+mean((pred.ridge - y_test)^2) # 0.406
 ```
 
