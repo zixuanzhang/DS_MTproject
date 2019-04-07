@@ -420,19 +420,19 @@ set.seed(1234)
 lmFit1 <- train(user_rating ~ size_bytes,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1) 
+                trControl = ctr1) 
 lmFit2 <- train(user_rating ~ poly(size_bytes,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 lmFit3 <- train(user_rating ~ poly(size_bytes,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 lmFit4 <- train(user_rating ~ poly(size_bytes,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -448,19 +448,19 @@ set.seed(1234)
 lmFit1 <- train(user_rating ~ user_rating_ver,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1) 
+                trControl = ctr1) 
 lmFit2 <- train(user_rating ~ poly(user_rating_ver,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 lmFit3 <- train(user_rating ~ poly(user_rating_ver,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 lmFit4 <- train(user_rating ~ poly(user_rating_ver,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -476,19 +476,19 @@ set.seed(1234)
 lmFit1 <- train(user_rating ~ lang_num,
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1) 
+                trControl = ctr1) 
 lmFit2 <- train(user_rating ~ poly(lang_num,2),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 lmFit3 <- train(user_rating ~ poly(lang_num,3),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 lmFit4 <- train(user_rating ~ poly(lang_num,4),
                 data = apple_train, 
                 method = "lm",
-                trControl = ctrl1)
+                trControl = ctr1)
 
 resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
 summary(resamp) # MSE
@@ -661,7 +661,7 @@ set.seed(1234)
 gam.fit <- train(x_train, y_train,
                  method = "gam", # use gam
                  tuneGrid = data.frame(method = "GCV.Cp", select = c(TRUE,FALSE)),
-                 trControl = ctrl1)
+                 trControl = ctr1)
 
 gam.fit$bestTune # by doing feature selection, get a better error in terms of MSE
 
@@ -685,7 +685,7 @@ set.seed(1234)
 mars.fit <- train(x_train, y_train,
                  method = "earth",
                  tuneGrid = mars_grid,
-                 trControl = ctrl1)
+                 trControl = ctr1)
 
 ggplot(mars.fit) # each line is for one degree;
 
