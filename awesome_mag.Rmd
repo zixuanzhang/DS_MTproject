@@ -2,13 +2,11 @@
 title: "Group5 Code"
 author: "Bingyu Sun"
 date: "4/4/2019"
-output: 
-  pdf_document:
-    latex_engine: xelatex
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, out.width = 0.9, messages = FALSE)
 library(tidyverse)
 library(caret)
 library(glmnet)
@@ -66,16 +64,6 @@ apple %>%
 cor_matrix = model.matrix(user_rating ~., data = apple)[,-1]
 corrplot::corrplot(cor(cor_matrix))
 
-#Scatterplots
-apple %>% 
-  ggplot(aes(x = rating_count_tot, y = user_rating)) +
-  geom_point(alpha = .5) +
-  stat_smooth(method = "lm")
-
-apple %>% 
-  ggplot(aes(x = rating_count_ver, y = user_rating)) +
-  geom_point(alpha = .5) +
-  stat_smooth(method = "lm")
 
 apple %>% 
   ggplot(aes(x = size_megabytes, y = user_rating)) +
@@ -136,6 +124,7 @@ names(apple_2) # remove vpp_lic; 8 predictors + 1 response
 
 ####Box-cox
 ```{r, eval=FALSE}
+library(MASS)
 mult.fit1 <- lm(user_rating ~ size_megabytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num, data = apple) 
 boxcox(mult.fit1) 
 ```
@@ -577,8 +566,8 @@ mean((pred.pcr - y_test)^2) # 0.407
 pred.pls <- predict(pls.fit$finalModel, newdata = x_test, ncomp = pls.fit$bestTune$ncomp, type = "response")
 mean((pred.pls - y_test)^2) # 0.406
 
-#pred.lm <- predict(lm.fit$finalModel, newdata = x_test)
-#mean((pred.lm - y_test)^2) # 0.41??
+pred.lm <- predict(lm.fit, newdata = test_data)
+mean((pred.lm - y_test)^2) # 0.41
 pred.ridge <- predict(ridge.fit$finalModel, newx = x_test, s = ridge.fit$bestTune$lambda, type = "response")
 mean((pred.ridge - y_test)^2) # 0.406
 ```
