@@ -142,7 +142,7 @@ cv.ridge$lambda.min
 ```{r}
 cv.lasso = cv.glmnet(x_train, y_train, 
                      alpha = 1, 
-                     lambda = exp(seq(-6, 5, length = 100)))
+                     lambda = exp(seq(-6, 2, length = 100)))
 plot(cv.lasso)
 cv.lasso$lambda.min #optimal lambda
 
@@ -271,5 +271,23 @@ summary(resamples(list(#gam = gam.fit,
                       enet = enet.fit,
                       pcr = pcr.fit,
                       pls = pls.fit)), metric = "RMSE")
+```
+
+####Test MSE
+```{r}
+pred.elast <- predict(enet.fit$finalModel, newx = x_test, type = "response")
+mean((pred.elast - y_test)^2) # 0.419
+pred.mars <- predict(mars.fit$finalModel, newdata = x_test, type = "response")
+mean((pred.mars - y_test)^2) # 0.283
+pred.lasso <- predict(lasso.fit$finalModel, newx = x_test, type = "response")
+mean((pred.lasso - y_test)^2) # 0.419
+pred.pcr <- predict(pcr.fit$finalModel, newdata = x_test, type = "response")
+mean((pred.pcr - y_test)^2) # 0.450
+pred.pls <- predict(pls.fit$finalModel, newdata = x_test, type = "response")
+mean((pred.pls - y_test)^2) # 0.410
+pred.lm <- predict(lm.fit, newdata = data.frame(x_test))
+mean((pred.lm - y_test)^2) # 0.41??
+pred.ridge <- predict(ridge.fit, newdata = x_test)
+mean((pred.ridge - y_test)^2) # 0.406
 ```
 
