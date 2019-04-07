@@ -327,7 +327,6 @@ enet.fit <- train(x_train, y_train, method = "glmnet",
                    trControl = ctr1)
 enet.fit$bestTune # 
 plot(enet.fit) # figure
-enet.fit$preProcess
 ```
 comment: shows alpha = 0.75 with lambda = 0.005 gives the lowest RMSE
 
@@ -441,34 +440,7 @@ summary(resamp) # MSE
 bwplot(resamp, metric = "RMSE")
 ```
 
-comment: d = 4
-
-add higher order on price
-```{r}
-set.seed(1234)
-lmFit1 <- train(user_rating ~ price,
-                data = apple_train, 
-                method = "lm",
-                trControl = ctrl1) 
-lmFit2 <- train(user_rating ~ poly(price,2),
-                data = apple_train, 
-                method = "lm",
-                trControl = ctrl1)
-lmFit3 <- train(user_rating ~ poly(price,3),
-                data = apple_train, 
-                method = "lm",
-                trControl = ctrl1)
-lmFit4 <- train(user_rating ~ poly(price,4),
-                data = apple_train, 
-                method = "lm",
-                trControl = ctrl1)
-
-resamp <- resamples(list(d1 = lmFit1, d2 = lmFit2, d3 = lmFit3, d4 = lmFit4)) 
-summary(resamp) # MSE
-
-bwplot(resamp, metric = "RMSE")
-```
-comment: did not improve much, so keep d = 1
+comment: d = 1
 
 add higher order on  user_rating_ver
 ```{r}
@@ -681,8 +653,8 @@ plot(gam.m4)
 dev.off()
 ```
 
-use caret package to do gam???
-```{r}
+use caret package to do gam
+```{r eval=FALSE}
 # you can try other options
 
 set.seed(1234)
@@ -753,6 +725,8 @@ pred.mars <- predict(mars.fit$finalModel, newdata = x_test, type = "response")
 mean((pred.mars - y_test)^2) # 0.283
 pred.lasso <- predict(lasso.fit$finalModel, newx = x_test, type = "response")
 mean((pred.lasso - y_test)^2) # 0.42
+pred.ridge <- predict(ridge.fit$finalModel, newx = x_test, type = "response")
+mean((pred.ridge - y_test)^2) # 0.47
 pred.pcr <- predict(pcr.fit$finalModel, newdata = x_test, type = "response")
 mean((pred.pcr - y_test)^2) # 0.45
 pred.pls <- predict(pls.fit$finalModel, newdata = x_test, type = "response")
