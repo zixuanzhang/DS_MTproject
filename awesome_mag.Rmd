@@ -1,8 +1,10 @@
 ---
-title: "awesome_mag"
+title: "Group5 Code"
 author: "Bingyu Sun"
 date: "4/4/2019"
-output: html_document
+output: 
+  pdf_document:
+    latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
@@ -575,7 +577,7 @@ mean((pred.pcr - y_test)^2) # 0.407
 pred.pls <- predict(pls.fit$finalModel, newdata = x_test, ncomp = pls.fit$bestTune$ncomp, type = "response")
 mean((pred.pls - y_test)^2) # 0.406
 
-#pred.lm <- predict(lm.fit$finalModel, newdata = data.frame(x_test))
+#pred.lm <- predict(lm.fit$finalModel, newdata = x_test)
 #mean((pred.lm - y_test)^2) # 0.41??
 pred.ridge <- predict(ridge.fit$finalModel, newx = x_test, s = ridge.fit$bestTune$lambda, type = "response")
 mean((pred.ridge - y_test)^2) # 0.406
