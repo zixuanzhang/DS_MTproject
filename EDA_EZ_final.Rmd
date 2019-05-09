@@ -44,46 +44,30 @@ apple <- apple.raw %>%
          cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+"))) # convert to megabytes
 
 colnames(apple)[colnames(apple)=="size_bytes"] <- "size_mb"
-anyNA(apple) # no missing values
 ```
 
 ## EDA
-
-feature plot
-```{r eval=FALSE}
-#jpeg('feature_plot.jpg')
-theme1 <- trellis.par.get()
-theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
-theme1$plot.symbol$pch <- 16
-theme1$plot.line$col <- rgb(.8, .1, .1, 1)
-theme1$plot.line$lwd <- 2
-theme1$strip.background$col <- rgb(.0, .2, .6, .2)
-trellis.par.set(theme1)
-featurePlot(apple[, -c(3,5,6)], apple$user_rating, plot = "scatter", labels = c("","Y"),
-            type = c("p"), layout = c(4,2)) # plot numerical values
-#dev.off()
-```
 
 ### Continuous variable
 
 size_mb, price, user_rating, user_rating_ver, sup_devices_num, ipad_sc_urls_num, lang_num  
 cutoff can be used to transform into categorical variables if neccesary
 ```{r}
-summary(apple)
+summary(apple) # 10 cols
 
-#size mb
+#size mb (right skew)
 apple %>% ggplot(aes(x = size_mb)) + geom_density()
 apple %>% filter(size_mb < 1000) %>% ggplot(aes(x = size_mb)) + geom_density() # less then 1000mb
 
-# price
+# price(heavily right skew, mostly < $10)
 apple %>% ggplot(aes(x = price)) + geom_density()
 apple %>% filter(price < 10) %>% ggplot(aes(x = price)) + geom_density()
 
-# user rating (outcome)
+# user rating (outcome): slightly left skewed but still symmetric curve
 apple %>% ggplot(aes(x = user_rating)) + geom_density()
 
-# user_rating_ver (current version rating)
-apple %>% ggplot(aes(x = user_rating_ver)) + geom_density()
+# user_rating_ver (current version rating): less high rating, more low rating
+apple %>% ggplot(aes(x = user_rating_ver)) + geom_density() 
 
 # sup_devices_num
 apple %>% ggplot(aes(x = sup_devices_num)) + geom_density()
@@ -109,12 +93,18 @@ apple %>% ggplot(aes(x = user_rating)) +
          subtitle="user rating for each content rating",
          x="user rating",
          color="content rating") 
+
+apple %>% group_by(cont_rating) %>% 
+  # summarize(mean_rating = mean(user_rating)) %>% 
+  mutate(mean_rating = mean(user_rating)) %>% 
+  ungroup() %>% 
+  mutate(cont_rating = forcats::fct_reorder(cont_rating, mean_rating)) %>% 
+  ggplot(aes(x = cont_rating, y = user_rating)) + geom_boxplot()
 ```
 
-
-More visualization
+prime_genre
 ```{r}
-# genre user rating
+# with user rating
 apple %>% group_by(prime_genre) %>% 
   # summarize(mean_rating = mean(user_rating)) %>% 
   mutate(mean_rating = mean(user_rating)) %>% 
@@ -123,18 +113,27 @@ apple %>% group_by(prime_genre) %>%
   ggplot(aes(x = prime_genre, y = user_rating)) + geom_boxplot() + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# content rating
-apple %>% group_by(cont_rating) %>% 
-  # summarize(mean_rating = mean(user_rating)) %>% 
-  mutate(mean_rating = mean(user_rating)) %>% 
-  ungroup() %>% 
-  mutate(cont_rating = forcats::fct_reorder(cont_rating, mean_rating)) %>% 
-  ggplot(aes(x = cont_rating, y = user_rating)) + geom_boxplot()
+apple %>% 
+  ggplot(aes(x = prime_genre, fill = prime_genre)) + geom_bar(stat = "count") +
+    theme(axis.text.x=element_blank()) +
+  labs(
+    title = "Barplot of number of items ordered from each aisle",
+    x = "aisle name",
+    y = "number of items"
+  ) + theme(legend.position = "bottom")
+```
 
-apple %>% group_by(cont_rating) %>% 
-  count(prime_genre) %>% 
-  ggplot(aes(x = cont_rating, y = n, fill = prime_genre)) + geom_bar(stat = "identity") +
-  theme(legend.position = "bottom")
+
+vpp_lic
+```{r}
+# content rating
+apple %>% ggplot(aes(x = user_rating)) +
+  geom_density(aes(color=vpp_lic), alpha=0.6, lwd = 0.8) + 
+  scale_color_brewer(palette="Dark2") +
+    labs(title="Density plot", 
+         subtitle="user rating for each content rating",
+         x="user rating",
+         color="content rating") 
 ```
 
 correlation plot excluding two factor variables : content rating and genre
@@ -143,11 +142,9 @@ apple <- apple %>% dplyr::select(user_rating, everything())
 apple <- apple %>% 
   mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1 , 0)))
 
-appleCor <-  cor(apple[-c(5)]) # correlation matrix of the modified dataset above
+appleCor <-  cor(apple[-c(5,6,10)]) # correlation matrix of the modified dataset above
 appleCor
 summary(appleCor[upper.tri(appleCor)]) # summary
-
-appleCor > 0.48 # user rating (all version) and user rating (current version)
 
 x <- model.matrix(user_rating ~., data = apple)[,-1]
 
@@ -161,7 +158,7 @@ Games, 4+ rating are oversampled
 
 check linear dependency of numerical predictors (no problematic predictors)
 ```{r}
-nzv <- nearZeroVar(apple) # nzv: near zero variance
+nzv <- nearZeroVar(apple) # nzv: near zero variance; vpp_lic is nzv, so removed
 apple <- apple[, -nzv]
 combInfo <- findLinearCombos(apple[,-c(5)]) # on numerical values
 combInfo # no linear dependency problem
@@ -171,7 +168,9 @@ names(apple) # remove vpp_lic; 8 predictors + 1 response
 ## Box-Cox Transformation
 
 ```{r}
-mult.fit1 <- lm(user_rating ~ size_bytes + price + user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num, data = apple) 
+mult.fit1 <- lm(user_rating ~ size_mb + price + 
+                  user_rating_ver + cont_rating + prime_genre + sup_devices_num + ipad_sc_urls_num + lang_num,
+                data = apple)
 boxcox(mult.fit1) 
 ```
 
@@ -194,15 +193,14 @@ dim(apple_test)
 ```{r}
 # predictor pool
 x <- model.matrix(user_rating ~., data = apple)[,-1] # remove the intercept column; design matrix
-x
 dim(x)
+colnames(x)
 # response
 y <- apple$user_rating
-unique(y)
 
 # train data design matrix
 x_train <- model.matrix(user_rating ~., data = apple_train)[,-1] 
-dim(x_train) # 5399 x 10
+dim(x_train) # 4702 x 10
 y_train <- apple_train$user_rating
 unique(y_train)
 
@@ -210,7 +208,7 @@ unique(y_train)
 x_test <- model.matrix(user_rating ~., data = apple_test)[,-1] 
 dim(x_test) # 1798 x 10
 y_test <- apple[-trRows,]$user_rating
-unique(y_test)
+length(y_test) # 1566
 ```
 
 
@@ -228,13 +226,12 @@ summary(linear.model)
 
 1. use glmnet package
 
-ridge regression: we have large number of predictors(including categorical variables, so lots of dummy variables)
 
 use ridge regression from `glmnet` package
 ```{r}
 # ridge regression with 100 tuning parameter values (model formula)
 ridge.model <- glmnet(x_train, y_train, alpha = 0, lambda = exp(seq(-10, 6, length = 100)))
-plot(ridge.model, xvar = "lambda", label = TRUE)
+#plot(ridge.model, xvar = "lambda", label = TRUE)
 ```
 
 use 10 fold CV to select tuning para.
@@ -279,10 +276,9 @@ lasso.model <- glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, leng
 use 10 fold CV to select tuning para.
 ```{r}
 set.seed(1234)
-cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 100)), 
+cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1, lambda = exp(seq(-10, 6, length = 150)), 
                       type.measure = "mse")
 plot(cv.lasso)
-plot(cv.lasso$glmnet.fit, xvar = "lambda", label=TRUE)
 
 # optimal lambda:
 cv.lasso$lambda.min # 0.003
@@ -309,7 +305,7 @@ pred.lasso <- predict(lasso.model, s = best.lambda, newx = x_test, type = "respo
 mean((y_test - pred.lasso)^2) # 0.9022
 ```
 
-
+---------------------------------------------
 2. use caret package(better for comparison)
 
 use all data points: since this function will do repeated cv for us, we better feed it with all data we have.
@@ -319,12 +315,12 @@ ctr1 <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
 set.seed(1234)
 ridge.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = 0,
-                                          lambda = exp(seq(-10, 6, length = 100))),
+                                          lambda = exp(seq(-10, 6, length = 150))),
                    trControl = ctr1)
 
 lasso.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = 1,
-                                          lambda = exp(seq(-10, 6, length = 100))),
+                                          lambda = exp(seq(-10, 6, length = 150))),
                    trControl = ctr1)
 plot(ridge.fit, xTrans = function(x) log(x))
 plot(lasso.fit, xTrans = function(x) log(x))
@@ -333,7 +329,7 @@ plot(lasso.fit, xTrans = function(x) log(x))
 look at model
 ```{r}
 ridge.fit$bestTune # 0.106
-lasso.fit$bestTune # 0.0023 almost no penalty
+lasso.fit$bestTune # 0.0023 almost no penalty # 0.00303
 lasso.fit$finalModel
 
 # coefficients
@@ -341,14 +337,14 @@ predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, type="coefficients")
 predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, type="coefficients")
 ```
 
-elastic net
+elastic net (increase tuning space)
 ```{r}
 set.seed(1234)
 enet.fit <- train(x_train, y_train, method = "glmnet", 
                    tuneGrid = expand.grid(alpha = seq(0, 1, length = 5),
-                                          lambda = exp(seq(-10, 6, length = 100))),
+                                          lambda = exp(seq(-10, 6, length = 150))),
                    trControl = ctr1)
-enet.fit$bestTune # 
+enet.fit$bestTune # ?? changed
 plot(enet.fit) # figure
 ```
 comment: shows alpha = 0.75 with lambda = 0.005 gives the lowest RMSE
@@ -358,7 +354,7 @@ compare between lasso, ridge, linear fit
 set.seed(1234)
 lm.fit <- train(x_train, y_train, method = "lm", trControl = ctr1)
 
-resamp <- resamples(list(ridge = ridge.fit, lasso = lasso.fit, lm = lm.fit))
+resamp <- resamples(list(ridge = ridge.fit, lasso = lasso.fit, lm = lm.fit, enet = enet.fit))
 summary(resamp)
 bwplot(resamp, metric = "RMSE")
 ```
@@ -368,10 +364,10 @@ Comment: lasso and ridge does not improve the linear model. Since we assume the 
 test MSE
 ```{r}
 mean((y_test - predict(ridge.fit$finalModel, s=ridge.fit$bestTune$lambda, newx = x_test,
-          type="response"))^2) # 0.9062
+          type="response"))^2) 
 mean((y_test - predict(lasso.fit$finalModel, s=lasso.fit$bestTune$lambda, newx = x_test,
-          type="response"))^2)  # 0.9022
-mean((y_test - predict(lm.fit, newdata = x_test))^2) # 0.90
+          type="response"))^2)  
+mean((y_test - predict(lm.fit, newdata = x_test))^2) 
 ```
 
 ### PCR and PLS
@@ -437,8 +433,6 @@ CV to compare models up to d = 4 and make plot
 
 add higher order on size_bytes
 ```{r}
-# ctrl2 <- trainControl(method = "cv", number = 10)
-
 set.seed(1234)
 lmFit1 <- train(user_rating ~ size_bytes,
                 data = apple_train, 
@@ -681,14 +675,14 @@ use caret package to do gam
 # you can try other options
 
 set.seed(1234)
-gam.fit <- train(x_train, y_train,
+gam.fit <- train(apple_train, apple_train$user_rating,
                  method = "gam", # use gam
                  tuneGrid = data.frame(method = "GCV.Cp", select = c(TRUE,FALSE)),
                  trControl = ctr1)
 
 gam.fit$bestTune # by doing feature selection, get a better error in terms of MSE
 
-gam.fit$finalModel 
+gam.fit$finalModel
 ```
 
 #### MARS
@@ -698,9 +692,10 @@ library(pdp)
 library(earth)
 ```
 
+change pruning space
 ```{r}
 mars_grid <- expand.grid(degree = 1:2,  # to include interaction or not
-                         nprune = 2:11) # how many variables you want to include
+                         nprune = 2:30) # how many variables you want to include
 mars_grid
 
 
@@ -733,6 +728,7 @@ resamp <- resamples(list(lasso = lasso.fit,
                          lm = lm.fit,
                          pcr = pcr.fit,
                          pls = pls.fit,
+                         enet = enet.fit,
                          mars = mars.fit))
 
 summary(resamp)
@@ -756,6 +752,7 @@ pred.pls <- predict(pls.fit$finalModel, newdata = x_test, type = "response")
 mean((pred.pls - y_test)^2) # 0.41
 pred.lm <- predict(lm.fit, newdata = x_test)
 mean((pred.lm - y_test)^2) # 0.41
+pred.gam <- predict()
 ```
 
 

@@ -1,0 +1,19 @@
+---
+title: "ClassifyMethod_EZ"
+author: "Eleanor Zhang"
+date: "5/9/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Linear Methods for Classification
+
+### graphics
+
+
+### logistic regression
+
+
