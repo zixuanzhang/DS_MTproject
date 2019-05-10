@@ -56,8 +56,8 @@ cutoff can be used to transform into categorical variables if neccesary
 summary(apple) # 10 cols
 
 #size mb (right skew)
-apple %>% ggplot(aes(x = size_mb)) + geom_density()
-apple %>% filter(size_mb < 1000) %>% ggplot(aes(x = size_mb)) + geom_density() # less then 1000mb
+apple %>% ggplot(aes(x = size_megabytes)) + geom_density()
+apple %>% filter(size_megabytes < 1000) %>% ggplot(aes(x = size_megabytes)) + geom_density() # less then 1000mb
 
 # price(heavily right skew, mostly < $10)
 apple %>% ggplot(aes(x = price)) + geom_density()
@@ -65,6 +65,7 @@ apple %>% filter(price < 10) %>% ggplot(aes(x = price)) + geom_density()
 
 # user rating (outcome): slightly left skewed but still symmetric curve
 apple %>% ggplot(aes(x = user_rating)) + geom_density()
+table(apple$user_rating)
 
 # user_rating_ver (current version rating): less high rating, more low rating
 apple %>% ggplot(aes(x = user_rating_ver)) + geom_density() 
@@ -163,6 +164,8 @@ apple <- apple[, -nzv]
 combInfo <- findLinearCombos(apple[,-c(5)]) # on numerical values
 combInfo # no linear dependency problem
 names(apple) # remove vpp_lic; 8 predictors + 1 response
+
+str(apple)
 ```
 
 ## Box-Cox Transformation
