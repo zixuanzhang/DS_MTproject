@@ -37,13 +37,14 @@ unique(apple.raw$currency) # all price on USD unit, so remove this
 
 apple <- apple.raw %>% 
   dplyr::select(-c(x1, track_name, id, currency, ver, rating_count_ver)) %>%
-  filter(rating_count_tot != 0) %>% 
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% 
   dplyr::select(-rating_count_tot) %>% 
   mutate(size_bytes = round(size_bytes * 1e-6),
          vpp_lic = factor(vpp_lic),
          cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+"))) # convert to megabytes
 
-colnames(apple)[colnames(apple)=="size_bytes"] <- "size_mb"
+colnames(apple)[colnames(apple)=="size_bytes"] <- "size_megabytes"
 ```
 
 ## EDA
@@ -64,7 +65,8 @@ apple %>% ggplot(aes(x = price)) + geom_density()
 apple %>% filter(price < 10) %>% ggplot(aes(x = price)) + geom_density()
 
 # user rating (outcome): slightly left skewed but still symmetric curve
-apple %>% ggplot(aes(x = user_rating)) + geom_density()
+apple %>% ggplot(aes(x = user_rating)) + 
+  geom_histogram() + ggtitle("histogram of user rating (outcome)")
 table(apple$user_rating)
 
 # user_rating_ver (current version rating): less high rating, more low rating
