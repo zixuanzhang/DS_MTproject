@@ -1,0 +1,198 @@
+---
+title: "Finalproject_Ma"
+author: "Mengran Ma"
+date: "5/10/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 7,fig.asp = .7,out.width = "90%",
+                      message = FALSE, warning = FALSE)
+library(tidyverse)
+library(ggridges)
+library(caret)
+library(boot)
+library(pls)
+library(glmnet)
+library(splines)
+library(mgcv)
+library(MASS)
+library(GGally)
+library(RColorBrewer)
+library(randomForest) 
+library(ranger)
+theme_set(theme_classic())
+library(gbm)
+
+```
+
+## Data 
+
+Binary outcome
+```{r}
+apple <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")),
+         user_rating = ifelse(user_rating >= 4, 1, 0)) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
+
+str(apple)
+table(apple$user_rating)
+```
+
+split data into train and test
+```{r}
+set.seed(1234)
+#Split data to traning and testing
+trRows = createDataPartition(apple$user_rating,
+                             p = .75,
+                             list = FALSE)
+train_data = apple[trRows,]
+test_data = apple[-trRows,]
+#in matrix form
+x_train = model.matrix(user_rating~., train_data)[,-1] 
+y_train = train_data$user_rating
+x_test = model.matrix(user_rating~., test_data)[,-1] 
+y_test = test_data$user_rating
+
+ctrl1 = trainControl(method = "cv", number = 10)
+```
+
+continous outcome
+```{r}
+apple1 <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")))%>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
+
+str(apple1)
+
+train_data1 = apple1[trRows,]
+test_data1 = apple1[-trRows,]
+#in matrix form
+x_train1 = model.matrix(user_rating~., train_data1)[,-1] 
+y_train1 = train_data1$user_rating
+x_test1 = model.matrix(user_rating~., test_data1)[,-1] 
+y_test1 = test_data1$user_rating
+```
+
+## Data descriptions
+
+size megabytes is right skewed, mostly less than 1000 mb;  
+price is right skewed, most less than $10;  
+overall user rating is left skewed; recode into binary variable as either high rating(>= 4) or low (<4) user rating of current version
+
+#Bagging
+```{r}
+bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:40) 
+set.seed(1234)
+
+bag.fit <- train(user_rating~., train_data1, method = "ranger", tuneGrid = bag.grid, trControl = ctrl1)
+ggplot(bag.fit, highlight = TRUE)
+```
+
+
+```{r}
+set.seed(1234)
+bagging <- ranger(user_rating~., apple1, mtry = 8, min.node.size = 4) 
+bagging.per <- ranger(user_rating~., apple1, 
+                      mtry = 8, 
+                      splitrule = "variance",
+                      min.node.size = 4,
+                      importance = "permutation",
+                      scale.permutation.importance = TRUE) # better to standardize importance
+
+barplot(sort(ranger::importance(bagging.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB", 
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+
+set.seed(1234)
+bagging.impurity <- ranger(lpsa~., Prostate,
+                        mtry = 8, splitrule = "variance",
+                        min.node.size = 4,
+                        importance = "impurity")
+barplot(sort(ranger::importance(bagging.impurity), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS)",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+
+#Random Forest
+```{r}
+# Try more if possible
+rf.grid <- expand.grid(mtry = 1:8,
+                       splitrule = "variance",
+                       min.node.size = 1:6)
+set.seed(1234)
+rf.fit <- train(user_rating~., apple1,
+                method = "ranger",
+                tuneGrid = rf.grid,
+                trControl = ctrl1)
+
+ggplot(rf.fit, highlight = TRUE)
+rf.fit$bestTune
+```
+
+```{r}
+set.seed(1234)
+rf2.final.per <- ranger(user_rating~., apple1,
+                        mtry = 3, splitrule = "variance",
+                        min.node.size = 6,
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(rf2.final.per), decreasing = FALSE),
+las = 2, horiz = TRUE, cex.names = 0.7,
+col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+```{r}
+set.seed(1234)
+rf.final.imp <- ranger(user_rating~., apple1,
+                        mtry = 3, splitrule = "variance",
+                        min.node.size = 6,
+                        importance = "impurity")
+barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE),
+las = 2, horiz = TRUE, cex.names = 0.7,
+col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+#Boosting
+```{r}
+set.seed(1234)
+bst <- gbm(user_rating~., apple1,
+           distribution = "gaussian", # use RSS loss function (l2 method)
+           n.trees = 5000, # number of trees (B) 
+           interaction.depth = 1, # depth of tree (d) 
+           shrinkage = 0.005, # learnng rate lambda 
+           cv.folds = 10)
+gbm.perf(bst, method = "cv")
+```
+
+```{r}
+# Try more
+gbm.grid <- expand.grid(n.trees = c(4000, 5000, 6000), interaction.depth = 1:10,
+shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
+set.seed(1234)
+gbm.fit <- train(user_rating~., apple1,
+                 method = "gbm",
+                 tuneGrid = gbm.grid,
+                 trControl = ctrl1,
+                 verbose = FALSE)
+ggplot(gbm.fit, highlight = TRUE)
+gbm.fit$bestTune
+
+summary(gbm.fit$finalModel, las = 2, cBars = 8, cex.names = 0.8)
+```
+
