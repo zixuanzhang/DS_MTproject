@@ -11,17 +11,15 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, fig.width = 7,fig.asp = .7,out.width = "90%",
                       message = FALSE, warning = FALSE)
 library(tidyverse)
-library(ggridges)
 library(caret)
 library(boot)
-library(corrplot)
-library(pls)
-library(glmnet)
-library(splines)
 library(mgcv)
-library(MASS)
-library(GGally)
 library(RColorBrewer)
+library(glmnet)
+library(MASS) # contain data
+library(mlbench) 
+library(pROC) # generate ROC curve
+library(AppliedPredictiveModeling)
 theme_set(theme_classic())
 ```
 

@@ -11,18 +11,19 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, fig.width = 7,fig.asp = .7,out.width = "90%",
                       message = FALSE, warning = FALSE)
 library(tidyverse)
-library(ggridges)
 library(caret)
 library(boot)
-library(pls)
+library(corrplot)
 library(glmnet)
 library(splines)
 library(mgcv)
-library(MASS)
-library(GGally)
 library(RColorBrewer)
+library(MASS) # contain data
+library(mlbench) 
+library(pROC) # generate ROC curve
+library(AppliedPredictiveModeling)
+library(ggpubr)
 theme_set(theme_classic())
-
 ```
 
 ## Data 
@@ -76,8 +77,6 @@ apple1 <- read_csv("./data/AppleStore.csv") %>%
   mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
   dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
 
-str(apple1)
-
 train_data1 = apple1[trRows,]
 test_data1 = apple1[-trRows,]
 #in matrix form
@@ -87,20 +86,103 @@ x_test1 = model.matrix(user_rating~., test_data1)[,-1]
 y_test1 = test_data1$user_rating
 ```
 
-## Data descriptions
+## Data descriptions and EDA
 
 size megabytes is right skewed, mostly less than 1000 mb;  
 price is right skewed, most less than $10;  
 overall user rating is left skewed; recode into binary variable as either high rating(>= 4) or low (<4) user rating of current version
 
+continous
+```{r}
+transparentTheme(trans = .4)
+featurePlot(x = apple[, c(1,2,4,7,8,9)], # all features are numeric
+            y = factor(apple$user_rating), # binary variable
+            scales = list(x = list(relation="free"), 
+                        y = list(relation="free")), # set both x and y scales to be free
+            plot = "density", # density plot for each variable; 
+            pch = "|",  # set the marker
+            auto.key = list(columns = 2))
+```
+
+categorical
+```{r}
+# aggregate(user_rating ~ cont_rating + prime_genre, data = apple, mean)
+apple %>% mutate(user_rating = factor(user_rating),
+                 prime_genre = factor(prime_genre)) %>% 
+  group_by(user_rating, prime_genre, cont_rating) %>% 
+  summarize(n = n()) %>% 
+  ggplot(aes(x = cont_rating, y = n))+
+  geom_bar(
+    aes(fill = factor(prime_genre)), stat = "identity", color = "white",
+    position = position_dodge(0.9)
+    )+
+  facet_wrap(~user_rating) + 
+  fill_palette("jco") + 
+  labs(title="frequency of user rating category by content level and prime genre", 
+       subtitle = "0: medium/low rating, 1: high rating",
+         x="Content rating level")
+```
+
+
+## CART (caret package)
+
+```{r}
+library(rpart) # for recursive partition (CART: Classfification and Regression Tree)
+library(rpart.plot) # better tool to visualze CART tree
+library(party) # conditional inference tree (stopping criterion is based on permutation test; problem of early stoppoing)
+library(partykit) # visualize party object
+library(randomForest) # random Forest; could be slow
+library(ranger) # C++ improvement on randomForest; much faster for tuning paremeter
+library(gbm) # gradient boosting machine (boosting)
+library(plotmo) 
+library(pdp) # create partial dependence plot
+library(lime)
+```
+
+### regression tree
+
+tune Cp
+```{r}
+ctrl <- trainControl(method = "cv") # very slow
+set.seed(1234)
+# tune over cp, method = "rpart"
+rpart.fit <- train(user_rating~., train_data1, 
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-2, length = 20))), # try many values here
+                   trControl = ctrl)
+ggplot(rpart.fit, highlight = TRUE)
+rpart.fit$bestTune # 0.00378
+rpart.plot(rpart.fit$finalModel)
+```
+
+tune maximum depth
+```{r}
+set.seed(1234)
+rpart2.fit <- train(user_rating~., train_data1, 
+                   method = "rpart2",
+                   tuneGrid = data.frame(maxdepth = 1:7), 
+                   trControl = ctrl)
+ggplot(rpart2.fit, highlight = TRUE)
+rpart2.fit$bestTune # depth = 5
+rpart.plot(rpart2.fit$finalModel)
+```
+
+Conditional inference tree: tune `mincriterion` (1-alpha)
+```{r}
+set.seed(1234)
+ctree.fit <- train(factor(user_rating)~., train_data, 
+                   method = "ctree",
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-6, -2, length = 20))),
+                   trControl = ctrl)
+ggplot(ctree.fit, highlight = TRUE)
+plot(ctree.fit$finalModel)
+```
+
+
+### classfication tree
 
 
 
-## Linear Methods for Classification
 
-### graphics
-
-
-### logistic regression
 
 
