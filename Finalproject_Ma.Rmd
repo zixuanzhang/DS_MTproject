@@ -39,7 +39,8 @@ apple <- read_csv("./data/AppleStore.csv") %>%
   rename(size_megabytes = size_bytes) %>%
   filter(rating_count_tot != 0,
          user_rating_ver != 0) %>% #Remove apps with no user rating
-  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0)),
+         user_rating = as.factor(user_rating)) %>% 
   dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
 
 str(apple)
@@ -106,8 +107,8 @@ ggplot(bag.fit, highlight = TRUE)
 
 ```{r}
 set.seed(1234)
-bagging <- ranger(user_rating~., apple1, mtry = 8, min.node.size = 4) 
-bagging.per <- ranger(user_rating~., apple1, 
+bagging <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 4) 
+bagging.per <- ranger(user_rating~., train_data1, 
                       mtry = 8, 
                       splitrule = "variance",
                       min.node.size = 4,
@@ -119,7 +120,7 @@ barplot(sort(ranger::importance(bagging.per), decreasing = FALSE),
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
 
 set.seed(1234)
-bagging.impurity <- ranger(lpsa~., Prostate,
+bagging.impurity <- ranger(user_rating~., train_data1,
                         mtry = 8, splitrule = "variance",
                         min.node.size = 4,
                         importance = "impurity")
@@ -136,7 +137,7 @@ rf.grid <- expand.grid(mtry = 1:8,
                        splitrule = "variance",
                        min.node.size = 1:6)
 set.seed(1234)
-rf.fit <- train(user_rating~., apple1,
+rf.fit <- train(user_rating~., train_data,
                 method = "ranger",
                 tuneGrid = rf.grid,
                 trControl = ctrl1)
@@ -146,21 +147,36 @@ rf.fit$bestTune
 ```
 
 ```{r}
+# Try more if possible
+rf.grid2 <- expand.grid(mtry = 1:8,
+                       splitrule = "variance",
+                       min.node.size = 1:6)
 set.seed(1234)
-rf2.final.per <- ranger(user_rating~., apple1,
-                        mtry = 3, splitrule = "variance",
-                        min.node.size = 6,
-                        importance = "permutation",
-                        scale.permutation.importance = TRUE)
-barplot(sort(ranger::importance(rf2.final.per), decreasing = FALSE),
-las = 2, horiz = TRUE, cex.names = 0.7,
-col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+rf.fit2 <- train(user_rating~., train_data1,
+                method = "ranger",
+                tuneGrid = rf.grid2,
+                trControl = ctrl1)
+
+ggplot(rf.fit2, highlight = TRUE)
+rf.fit2$bestTune
 ```
 
 ```{r}
 set.seed(1234)
-rf.final.imp <- ranger(user_rating~., apple1,
-                        mtry = 3, splitrule = "variance",
+rf2.final.per <- ranger(user_rating~., train_data1,
+                        mtry = 2, splitrule = "variance",
+                        min.node.size = 6,
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(rf2.final.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+```{r}
+set.seed(1234)
+rf.final.imp <- ranger(user_rating~., train_data1,
+                        mtry = 2, splitrule = "variance",
                         min.node.size = 6,
                         importance = "impurity")
 barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE),
@@ -171,7 +187,7 @@ col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
 #Boosting
 ```{r}
 set.seed(1234)
-bst <- gbm(user_rating~., apple1,
+bst <- gbm(user_rating~., train_data1,
            distribution = "gaussian", # use RSS loss function (l2 method)
            n.trees = 5000, # number of trees (B) 
            interaction.depth = 1, # depth of tree (d) 
