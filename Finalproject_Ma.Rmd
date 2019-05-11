@@ -40,7 +40,7 @@ apple <- read_csv("./data/AppleStore.csv") %>%
   filter(rating_count_tot != 0,
          user_rating_ver != 0) %>% #Remove apps with no user rating
   mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0)),
-         user_rating = as.factor(user_rating)) %>% 
+         user_rating = as.numeric(user_rating)) %>% 
   dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
 
 str(apple)
@@ -97,21 +97,23 @@ overall user rating is left skewed; recode into binary variable as either high r
 
 #Bagging
 ```{r}
-bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:40) 
+bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:80) 
 set.seed(1234)
 
 bag.fit <- train(user_rating~., train_data1, method = "ranger", tuneGrid = bag.grid, trControl = ctrl1)
 ggplot(bag.fit, highlight = TRUE)
+
+bag.fit$bestTune
 ```
 
 
 ```{r}
 set.seed(1234)
-bagging <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 4) 
+bagging <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 59) 
 bagging.per <- ranger(user_rating~., train_data1, 
                       mtry = 8, 
                       splitrule = "variance",
-                      min.node.size = 4,
+                      min.node.size = 59,
                       importance = "permutation",
                       scale.permutation.importance = TRUE) # better to standardize importance
 
@@ -122,7 +124,7 @@ barplot(sort(ranger::importance(bagging.per), decreasing = FALSE),
 set.seed(1234)
 bagging.impurity <- ranger(user_rating~., train_data1,
                         mtry = 8, splitrule = "variance",
-                        min.node.size = 4,
+                        min.node.size = 59,
                         importance = "impurity")
 barplot(sort(ranger::importance(bagging.impurity), decreasing = FALSE),
         las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS)",
@@ -161,30 +163,61 @@ ggplot(rf.fit2, highlight = TRUE)
 rf.fit2$bestTune
 ```
 
-```{r}
+```{r, fig.width=10, dpi=300}
 set.seed(1234)
-rf2.final.per <- ranger(user_rating~., train_data1,
+rf.final.per <- ranger(user_rating~., train_data,
                         mtry = 2, splitrule = "variance",
                         min.node.size = 6,
                         importance = "permutation",
                         scale.permutation.importance = TRUE)
-barplot(sort(ranger::importance(rf2.final.per), decreasing = FALSE),
-        las = 2, horiz = TRUE, cex.names = 0.7,
+barplot(sort(ranger::importance(rf.final.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB for Binary outcome/response",
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
-```
 
-```{r}
 set.seed(1234)
-rf.final.imp <- ranger(user_rating~., train_data1,
+rf.final.imp <- ranger(user_rating~., train_data,
                         mtry = 2, splitrule = "variance",
                         min.node.size = 6,
                         importance = "impurity")
 barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE),
-las = 2, horiz = TRUE, cex.names = 0.7,
-col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS) for Binary outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
 ```
 
+```{r, fig.width=1, dpi=300}
+set.seed(1234)
+rf2.final.per2 <- ranger(user_rating~., apple1,
+                         mtry = 3, splitrule = "variance",
+                         min.node.size = 5,
+                         importance = "permutation",
+                         scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(rf2.final.per2), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB for Contious outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+
+set.seed(1234)
+rf2.final.imp2 <- ranger(user_rating~., train_data1,
+                        mtry = 3, splitrule = "variance",
+                        min.node.size = 5,
+                        importance = "impurity")
+barplot(sort(ranger::importance(rf2.final.imp2), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS) for Continuous outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+
 #Boosting
+```{r}
+set.seed(1234)
+bst <- gbm(user_rating~., train_data,
+           distribution = "gaussian", # use RSS loss function (l2 method)
+           n.trees = 5000, # number of trees (B) 
+           interaction.depth = 1, # depth of tree (d) 
+           shrinkage = 0.005, # learnng rate lambda 
+           cv.folds = 10)
+gbm.perf(bst, method = "cv")
+```
+
 ```{r}
 set.seed(1234)
 bst <- gbm(user_rating~., train_data1,
@@ -198,10 +231,10 @@ gbm.perf(bst, method = "cv")
 
 ```{r}
 # Try more
-gbm.grid <- expand.grid(n.trees = c(4000, 5000, 6000), interaction.depth = 1:10,
-shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
+gbm.grid <- expand.grid(n.trees = c(4000, 5000, 7000), interaction.depth = 1:10,
+                        shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
 set.seed(1234)
-gbm.fit <- train(user_rating~., apple1,
+gbm.fit <- train(user_rating~., train_data,
                  method = "gbm",
                  tuneGrid = gbm.grid,
                  trControl = ctrl1,
@@ -212,3 +245,18 @@ gbm.fit$bestTune
 summary(gbm.fit$finalModel, las = 2, cBars = 8, cex.names = 0.8)
 ```
 
+```{r}
+# Try more
+gbm.grid2 <- expand.grid(n.trees = c(2000, 3000, 5000), interaction.depth = 1:10,
+                        shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
+set.seed(1234)
+gbm.fit2 <- train(user_rating~., train_data1,
+                 method = "gbm",
+                 tuneGrid = gbm.grid2,
+                 trControl = ctrl1,
+                 verbose = FALSE)
+ggplot(gbm.fit2, highlight = TRUE)
+gbm.fit2$bestTune
+
+summary(gbm.fit2$finalModel, las = 2, cBars = 8, cex.names = 0.8)
+```
