@@ -23,6 +23,10 @@ library(randomForest)
 library(ranger)
 theme_set(theme_classic())
 library(gbm)
+# parallel processing with caret
+library(doParallel)
+cluster <- makePSOCKcluster(10)
+registerDoParallel(cluster)
 
 ```
 
@@ -97,23 +101,33 @@ overall user rating is left skewed; recode into binary variable as either high r
 
 #Bagging
 ```{r}
-bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:80) 
+bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:300) 
 set.seed(1234)
 
-bag.fit <- train(user_rating~., train_data1, method = "ranger", tuneGrid = bag.grid, trControl = ctrl1)
+bag.fit <- train(user_rating~., train_data, method = "ranger", tuneGrid = bag.grid, trControl = ctrl1)
 ggplot(bag.fit, highlight = TRUE)
 
 bag.fit$bestTune
 ```
 
+```{r}
+bag.grid2 <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:150) 
+set.seed(1234)
+
+bag.fit2 <- train(user_rating~., train_data1, method = "ranger", tuneGrid = bag.grid2, trControl = ctrl1)
+ggplot(bag.fit2, highlight = TRUE)
+
+bag.fit2$bestTune
+```
+
 
 ```{r}
 set.seed(1234)
-bagging <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 59) 
+bagging <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 81) 
 bagging.per <- ranger(user_rating~., train_data1, 
                       mtry = 8, 
                       splitrule = "variance",
-                      min.node.size = 59,
+                      min.node.size = 81,
                       importance = "permutation",
                       scale.permutation.importance = TRUE) # better to standardize importance
 
@@ -124,7 +138,7 @@ barplot(sort(ranger::importance(bagging.per), decreasing = FALSE),
 set.seed(1234)
 bagging.impurity <- ranger(user_rating~., train_data1,
                         mtry = 8, splitrule = "variance",
-                        min.node.size = 59,
+                        min.node.size = 81,
                         importance = "impurity")
 barplot(sort(ranger::importance(bagging.impurity), decreasing = FALSE),
         las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS)",
@@ -247,7 +261,7 @@ summary(gbm.fit$finalModel, las = 2, cBars = 8, cex.names = 0.8)
 
 ```{r}
 # Try more
-gbm.grid2 <- expand.grid(n.trees = c(2000, 3000, 5000), interaction.depth = 1:10,
+gbm.grid2 <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:10,
                         shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
 set.seed(1234)
 gbm.fit2 <- train(user_rating~., train_data1,
@@ -259,4 +273,33 @@ ggplot(gbm.fit2, highlight = TRUE)
 gbm.fit2$bestTune
 
 summary(gbm.fit2$finalModel, las = 2, cBars = 8, cex.names = 0.8)
+```
+
+#Compare models
+```{r}
+set.seed(1234)
+# tune over cp, method = "rpart" 
+rpart.fit1 <- train(user_rating~., train_data,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-8,-2, length = 20))), trControl = ctrl1)
+
+resamp <- resamples(list(rpart = rpart.fit1, bag = bag.fit, rf = rf.fit, gbm = gbm.fit)) 
+summary(resamp)
+bwplot(resamp, metric = "RMSE")
+```
+
+```{r}
+set.seed(1234)
+# tune over cp, method = "rpart" 
+rpart.fit2 <- train(user_rating~., train_data1,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-8,-2, length = 20))), trControl = ctrl1)
+
+resamp2 <- resamples(list(rpart = rpart.fit2,bag = bag.fit2, rf = rf.fit2, gbm = gbm.fit2)) 
+summary(resamp2)
+bwplot(resamp2, metric = "RMSE")
+```
+
+```{r, echo=F}
+stopCluster(cluster)
 ```
