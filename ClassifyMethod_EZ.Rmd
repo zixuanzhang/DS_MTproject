@@ -251,3 +251,141 @@ rpartc.pred.bin <- predict(ctree.fit.bin, newdata = apple[-trRows,],
 ```
 
 
+## Cluster and PCA (entire dataset)
+
+```{r}
+library(factoextra) # fviz_() functions
+library(gridExtra)
+library(gplots)
+```
+
+prepare data
+```{r}
+dat <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")),
+         user_rating_bin = factor(ifelse(user_rating >= 4, "high", "med.low"), levels = c("med.low","high"))) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) %>% 
+  distinct(track_name, .keep_all = TRUE)
+
+str(dat)
+dat1 <- dat[, c(2,3, 5,8:10)]
+str(dat1)
+dat1 <- scale(dat1) # very important to scale data first
+rownames(dat1) <- dat$track_name # for dendrogram plotting
+```
+
+### K means clustering
+
+```{r}
+# this function determines the optimal number of clusters(for reference, there is no truth)
+fviz_nbclust(dat1,
+             FUNcluster = kmeans,
+             method = "silhouette") # three methods can be used; 
+set.seed(1234) # the initial group assignment matters
+km <- kmeans(dat1, centers = 6, nstart = 20) # try 20 different initial values
+
+km_vis <- fviz_cluster(list(data = dat1, cluster = km$cluster),  
+                       ellipse.type = "convex", # boundary shapes
+                       geom = c("point","text"), # add pokemon names
+                       labelsize = 5, 
+                       palette = "Dark2") + labs(title = "K-means") 
+
+km_vis # Plot fisrt 2 PC
+
+# outlier
+dat %>% filter(str_starts(track_name, "Proloquo2Go")) %>% View
+```
+
+### Hierarchical clustering
+
+```{r}
+hc.complete <- hclust(dist(dat1), method = "complete")
+hc.average <- hclust(dist(dat1), method = "average")
+hc.single <- hclust(dist(dat1), method = "single")
+hc.centroid <- hclust(dist(dat1), method = "centroid")
+```
+
+dendrogram
+
+```{r}
+fviz_dend(hc.complete, k = 6,   # make cut at forming 4 clusters    
+          cex = 0.3, 
+          palette = "jco", 
+          color_labels_by_k = TRUE, # color the label
+          rect = TRUE, rect_fill = TRUE, rect_border = "jco", # draw rectangles
+          labels_track_height = 2.5) # label size
+
+ind4.complete <- cutree(hc.complete, 4) # divide into 4 clusters; return the cluster assignment to each observation
+ind4.complete
+# Who are in the fourth cluster?
+dat[ind4.complete == 4,]
+```
+
+more details
+```{r}
+display.brewer.all(n=NULL, type="all", select=NULL, exact.n=TRUE)
+col1 <- colorRampPalette(brewer.pal(9, "GnBu"))(100)
+col2 <- colorRampPalette(brewer.pal(3, "Spectral"))(2)
+
+heatmap.2(t(dat1), # use transposed dataset
+          col = col1, keysize=.8, key.par = list(cex=.5),
+          trace = "none", key = TRUE, cexCol = 0.75, 
+          labCol = as.character(dat[,1]),
+          ColSideColors = col2[as.numeric(dat[,"Legendary"])+1],
+          margins = c(10, 10))
+```
+
+### PCA
+
+```{r}
+pca <- prcomp(dat1) # perform PCA
+pca$rotation # PC directions 
+pca$sdev # square this will be variation explained by each PC; usually decreasing
+pca$rotation %*% diag(pca$sdev) # correlation loading; correlation between each variable to PC direction
+corrplot(pca$rotation %*% diag(pca$sdev))
+
+var <- get_pca_var(pca) # get diff information about variables
+corrplot(var$cor)
+```
+
+percent explained bye each PC
+```{r}
+fviz_eig(pca, addlabels = TRUE)
+```
+
+PC components, variable contribution
+```{r}
+# the contribution of each var = rotation^2 to each PC
+a <- fviz_contrib(pca, choice = "var", axes = 1) # PC1
+b <- fviz_contrib(pca, choice = "var", axes = 2) # PC2
+grid.arrange(a, b, nrow = 2)
+
+# check this on PC1
+pca$rotation[,1]^2
+```
+
+
+```{r}
+# on the plot, the x axis(PC1) is correlation loading of each variable to PC1
+fviz_pca_biplot(pca, axes = c(1,2), # number of PC, use first two
+                habillage = dat$user_rating_bin, # groups
+                label = c("var"), # only label variable names
+                addEllipses = TRUE) # boundary of groups
+# legendary tend to have high special attack, attack and defence
+
+fviz_pca_var(pca, col.var = "steelblue", repel = TRUE) # if p = 2, then a circle
+
+# for individual
+fviz_pca_ind(pca,
+             habillage = dat$user_rating_bin,
+             label = "none",
+             addEllipses = TRUE)
+```
+
