@@ -120,11 +120,34 @@ ggplot(bag.fit2, highlight = TRUE)
 bag.fit2$bestTune
 ```
 
+```{r}
+set.seed(1234)
+bagging <- ranger(user_rating~., train_data, mtry = 8, min.node.size = 260) 
+bagging.per <- ranger(user_rating~., train_data, 
+                      mtry = 8, 
+                      splitrule = "variance",
+                      min.node.size = 260,
+                      importance = "permutation",
+                      scale.permutation.importance = TRUE) # better to standardize importance
+
+barplot(sort(ranger::importance(bagging.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB-Binary Outcome", 
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+
+set.seed(1234)
+bagging.impurity <- ranger(user_rating~., train_data,
+                        mtry = 8, splitrule = "variance",
+                        min.node.size = 260,
+                        importance = "impurity")
+barplot(sort(ranger::importance(bagging.impurity), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS)-Binary Outcome",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
 
 ```{r}
 set.seed(1234)
-bagging <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 81) 
-bagging.per <- ranger(user_rating~., train_data1, 
+bagging2 <- ranger(user_rating~., train_data1, mtry = 8, min.node.size = 81) 
+bagging.per2 <- ranger(user_rating~., train_data1, 
                       mtry = 8, 
                       splitrule = "variance",
                       min.node.size = 81,
@@ -132,16 +155,16 @@ bagging.per <- ranger(user_rating~., train_data1,
                       scale.permutation.importance = TRUE) # better to standardize importance
 
 barplot(sort(ranger::importance(bagging.per), decreasing = FALSE),
-        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB", 
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB-Continuous Outcome", 
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
 
 set.seed(1234)
-bagging.impurity <- ranger(user_rating~., train_data1,
+bagging.impurity2 <- ranger(user_rating~., train_data1,
                         mtry = 8, splitrule = "variance",
                         min.node.size = 81,
                         importance = "impurity")
 barplot(sort(ranger::importance(bagging.impurity), decreasing = FALSE),
-        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS)",
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS)-Continuous Outcome",
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
 ```
 
@@ -299,6 +322,22 @@ resamp2 <- resamples(list(rpart = rpart.fit2,bag = bag.fit2, rf = rf.fit2, gbm =
 summary(resamp2)
 bwplot(resamp2, metric = "RMSE")
 ```
+
+```{r}
+rpart.pred.label <- predict(rpart.fit, test_data)
+table(rpart.pred.label, test_data)
+rpart.pred.label2 <- predict(rpart.fit2, test_data1) 
+table(rpart.pred.label, test_data1)
+rf.pred.label <- predict(rf.fit, newdata = test_data) 
+table(rf.pred.label, test_data)
+rf.pred.label2 <- predict(rf.fit2, newdata = test_data1) 
+table(rf.pred.label2, test_data)
+gbmB.pred.label <- predict(gbm.fit, newdata = test_data) 
+table(gbmB.pred.label, test_data)
+gbmB.pred.label2 <- predict(gbm.fit2, newdata = test_data1) 
+table(gbmB.pred.label2, test_data)
+```
+
 
 ```{r, echo=F}
 stopCluster(cluster)
