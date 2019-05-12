@@ -17,6 +17,7 @@ library(glmnet)
 library(splines)
 library(mgcv)
 library(MASS)
+library(pROC)
 library(GGally)
 library(RColorBrewer)
 library(randomForest) 
@@ -104,7 +105,7 @@ overall user rating is left skewed; recode into binary variable as either high r
 bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:300) 
 set.seed(1234)
 
-bag.fit <- train(user_rating~., train_data, method = "ranger", tuneGrid = bag.grid, trControl = ctrl1)
+bag.fit <- train(user_rating~., train_data2, method = "ranger", tuneGrid = bag.grid, trControl = ctrl2)
 ggplot(bag.fit, highlight = TRUE)
 
 bag.fit$bestTune
@@ -173,13 +174,14 @@ barplot(sort(ranger::importance(bagging.impurity), decreasing = FALSE),
 ```{r}
 # Try more if possible
 rf.grid <- expand.grid(mtry = 1:8,
-                       splitrule = "variance",
+                       splitrule = "gini",
                        min.node.size = 1:6)
 set.seed(1234)
-rf.fit <- train(user_rating~., train_data,
+rf.fit <- train(user_rating~., train_data2,
                 method = "ranger",
                 tuneGrid = rf.grid,
-                trControl = ctrl1)
+                metric = "ROC",
+                trControl = ctrl2)
 
 ggplot(rf.fit, highlight = TRUE)
 rf.fit$bestTune
@@ -202,8 +204,8 @@ rf.fit2$bestTune
 
 ```{r, fig.width=10, dpi=300}
 set.seed(1234)
-rf.final.per <- ranger(user_rating~., train_data,
-                        mtry = 2, splitrule = "variance",
+rf.final.per <- ranger(user_rating~., train_data2,
+                        mtry = 2, splitrule = "gini",
                         min.node.size = 6,
                         importance = "permutation",
                         scale.permutation.importance = TRUE)
@@ -212,8 +214,8 @@ barplot(sort(ranger::importance(rf.final.per), decreasing = FALSE),
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
 
 set.seed(1234)
-rf.final.imp <- ranger(user_rating~., train_data,
-                        mtry = 2, splitrule = "variance",
+rf.final.imp <- ranger(user_rating~., train_data2,
+                        mtry = 2, splitrule = "gini",
                         min.node.size = 6,
                         importance = "impurity")
 barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE),
@@ -247,12 +249,13 @@ barplot(sort(ranger::importance(rf2.final.imp2), decreasing = FALSE),
 ```{r}
 set.seed(1234)
 bst <- gbm(user_rating~., train_data,
-           distribution = "gaussian", # use RSS loss function (l2 method)
-           n.trees = 5000, # number of trees (B) 
-           interaction.depth = 1, # depth of tree (d) 
-           shrinkage = 0.005, # learnng rate lambda 
+           distribution = "adaboost",
+           n.trees = 3000,
+           interaction.depth = 2,
+           shrinkage = 0.005,
            cv.folds = 10)
-gbm.perf(bst, method = "cv")
+nt <- gbm.perf(bst, method = "cv")
+nt
 ```
 
 ```{r}
@@ -267,14 +270,17 @@ gbm.perf(bst, method = "cv")
 ```
 
 ```{r}
+
 # Try more
-gbm.grid <- expand.grid(n.trees = c(4000, 5000, 7000), interaction.depth = 1:10,
+gbm.grid <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:6,
                         shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
 set.seed(1234)
-gbm.fit <- train(user_rating~., train_data,
+gbm.fit <- train(user_rating~., train_data2,
                  method = "gbm",
+                 distribution = "bernoulli",
                  tuneGrid = gbm.grid,
-                 trControl = ctrl1,
+                 trControl = ctrl2,
+                 metric = "ROC",
                  verbose = FALSE)
 ggplot(gbm.fit, highlight = TRUE)
 gbm.fit$bestTune
@@ -299,17 +305,6 @@ summary(gbm.fit2$finalModel, las = 2, cBars = 8, cex.names = 0.8)
 ```
 
 #Compare models
-```{r}
-set.seed(1234)
-# tune over cp, method = "rpart" 
-rpart.fit1 <- train(user_rating~., train_data,
-                   method = "rpart",
-                   tuneGrid = data.frame(cp = exp(seq(-8,-2, length = 20))), trControl = ctrl1)
-
-resamp <- resamples(list(rpart = rpart.fit1, bag = bag.fit, rf = rf.fit, gbm = gbm.fit)) 
-summary(resamp)
-bwplot(resamp, metric = "RMSE")
-```
 
 ```{r}
 set.seed(1234)
@@ -342,3 +337,216 @@ table(gbmB.pred.label2, test_data)
 ```{r, echo=F}
 stopCluster(cluster)
 ```
+
+## Data 
+
+Binary outcome: high rating = 1
+```{r}
+apple2 <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")),
+         user_rating = factor(ifelse(user_rating >= 4, "high", "med.low"), levels = c("med.low","high"))) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
+
+str(apple2)
+contrasts(apple2$user_rating)
+table(apple2$user_rating)
+```
+
+split data into train and test
+```{r}
+set.seed(1234)
+#Split data to traning and testing
+trRows = createDataPartition(apple2$user_rating,
+                             p = .75,
+                             list = FALSE)
+train_data2 = apple2[trRows,]
+test_data2 = apple2[-trRows,]
+#in matrix form
+x_train = model.matrix(user_rating~., train_data2)[,-1] 
+y_train = train_data2$user_rating
+x_test = model.matrix(user_rating~., test_data2)[,-1] 
+y_test = test_data2$user_rating
+
+ctrl1 = trainControl(method = "cv", number = 10)
+```
+
+continous outcome
+```{r}
+apple21 <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")))%>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
+
+train_data21 = apple21[trRows,]
+test_data21 = apple21[-trRows,]
+#in matrix form
+x_train1 = model.matrix(user_rating~., train_data21)[,-1] 
+y_train1 = train_data21$user_rating
+x_test1 = model.matrix(user_rating~., test_data21)[,-1] 
+y_test1 = test_data21$user_rating
+```
+
+
+
+## Methods
+
+```{r}
+library(rpart) # for recursive partition (CART: Classfification and Regression Tree)
+library(rpart.plot) # better tool to visualze CART tree
+library(party) # conditional inference tree (stopping criterion is based on permutation test; problem of early stoppoing)
+library(partykit) # visualize party object
+library(randomForest) # random Forest; could be slow
+library(ranger) # C++ improvement on randomForest; much faster for tuning paremeter
+library(gbm) # gradient boosting machine (boosting)
+library(plotmo) 
+library(pdp) # create partial dependence plot
+library(lime)
+```
+
+### CART: regression tree 
+use only caret package to tune
+
+```{r}
+ctrl1 = trainControl(method = "cv", number = 10) # very slow
+```
+
+Tune Cp: best = 0.002
+```{r}
+set.seed(1234)
+# tune over cp, method = "rpart"
+rpart.fit <- train(user_rating~., train_data1, 
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-10,-4, length = 20))), # try many values here
+                   trControl = ctrl1)
+ggplot(rpart.fit, highlight = TRUE)
+rpart.fit$bestTune # 0.002
+rpart.plot(rpart.fit$finalModel)
+```
+
+tune maximum depth : best = 5
+```{r}
+set.seed(1234)
+rpart2.fit <- train(user_rating~., train_data1, 
+                   method = "rpart2",
+                   tuneGrid = data.frame(maxdepth = 1:10), 
+                   trControl = ctrl1)
+ggplot(rpart2.fit, highlight = TRUE)
+rpart2.fit$bestTune # depth = 5
+rpart.plot(rpart2.fit$finalModel)
+```
+
+### Conditional inference tree (regression)
+
+stopping criterion is p value; at each step, the splitting rule is selected as the variable with strongest association with response. 
+*  pros: Avoid variable selection bias towards predictors with many possible cut points; ensures the right size tree is grown without additional pruning or cross validation, 
+*  cons: can stop early. 
+Tune: `mincriterion` (1- p.value)  
+
+```{r}
+set.seed(1234)
+ctree.fit <- train(user_rating~., train_data1, 
+                   method = "ctree",
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-7, -2, length = 30))),
+                   trControl = ctrl1)
+ggplot(ctree.fit, highlight = TRUE)
+ctree.fit$bestTune # 1 - p.value = 0.932
+plot(ctree.fit$finalModel)
+```
+
+
+### CART: classfication tree 
+
+use caret package only
+
+Tune Cp
+```{r}
+ctrl2 <- trainControl(method = "cv",
+                     summaryFunction = twoClassSummary, # use ROC curve as summary
+                     classProbs = TRUE)
+
+set.seed(1234)
+rpart.fit.bin <- train(user_rating~., apple2, 
+                   subset = trRows,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-3, len = 30))), 
+                   trControl = ctrl2,
+                   metric = "ROC")
+
+ggplot(rpart.fit.bin, highlight = TRUE)
+rpart.fit.bin$bestTune # cp = 0.0037, treesize = 7
+rpart.fit.bin$finalModel$cptable # look at the last row : treesize = nsplit + 1 = 6 + 1
+rpart.plot(rpart.fit.bin$finalModel) 
+```
+
+### Conditional Inference tree (classifcation)
+
+```{r}
+set.seed(1234)
+ctree.fit.bin <- train(user_rating~., apple2, 
+                   subset = trRows,
+                   method = "ctree",
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-4, -1, length = 30))), # 1-alpha
+                   metric = "ROC",
+                   trControl = ctrl2)
+ggplot(ctree.fit.bin, highlight = TRUE)
+ctree.fit.bin$bestTune # 1- p.value = 0.894
+plot(ctree.fit.bin$finalModel)
+```
+
+### predict on test data (regression)
+
+```{r}
+rpart.pred <- predict.train(rpart.fit, newdata = apple21[-trRows,]) # CART tree: Cp
+rpart.pred2 <- predict.train(rpart2.fit, newdata = apple21[-trRows,]) # CART tree: maximum depth
+ctree.pred <- predict.train(ctree.fit, newdata = apple21[-trRows,]) # ctree
+rf.pred <- predict.train(rf.fit2, newdata = apple21[-trRows,]) # Random Forest
+gbm.pred <- predict.train(gbm.fit2, newdata = apple21[-trRows,]) # Boosting
+```
+
+
+### predict on test data (classification)
+
+```{r}
+# predict on further tuning on cost complexity
+rpart.pred.bin <- predict(rpart.fit.bin, newdata = apple2[-trRows,], 
+                      type = "prob")[,1] # probability
+# predict on ctree
+rpartc.pred.bin <- predict(ctree.fit.bin, newdata = apple2[-trRows,],
+                       type = "prob")[,1]
+# predict on random forest
+rf.pred.bin <- predict(rf.fit, newdata = apple2[-trRows,], 
+                      type = "prob")[,1] # probability
+# predict on boosting
+gbm.pred.bin <- predict(gbm.fit, newdata = apple2[-trRows,],
+                       type = "prob")[,1]
+```
+
+```{r}
+roc.rpart <- roc(apple2$user_rating[-trRows], rpart.pred.bin) 
+roc.rpartc <- roc(apple2$user_rating[-trRows], rpartc.pred.bin) 
+roc.rf <- roc(apple2$user_rating[-trRows], rf.pred.bin) 
+roc.gbm <- roc(apple2$user_rating[-trRows], gbm.pred.bin) 
+
+plot(roc.rpart)
+plot(roc.rpartc, add = TRUE, col = 2) 
+plot(roc.rf, add = TRUE, col = 4) 
+plot(roc.gbm, add = TRUE, col = 5) 
+
+auc <- c(roc.rpart$auc[1], roc.rpartc$auc[1], roc.rf$auc[1], roc.gbm$auc[1])
+modelNames <- c("rpart","ctree","rf","gbm") 
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)), col = 1:6, lwd = 2)
+```
+
