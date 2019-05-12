@@ -28,14 +28,14 @@ theme_set(theme_classic())
 
 ## Data 
 
-Binary outcome
+Binary outcome: high rating = 1
 ```{r}
 apple <- read_csv("./data/AppleStore.csv") %>%
   janitor::clean_names() %>%
   dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
   mutate(size_bytes = round(size_bytes * 1e-6),
          cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")),
-         user_rating = ifelse(user_rating >= 4, 1, 0)) %>%
+         user_rating = factor(ifelse(user_rating >= 4, "high", "med.low"), levels = c("med.low","high"))) %>%
   rename(size_megabytes = size_bytes) %>%
   filter(rating_count_tot != 0,
          user_rating_ver != 0) %>% #Remove apps with no user rating
@@ -43,6 +43,7 @@ apple <- read_csv("./data/AppleStore.csv") %>%
   dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
 
 str(apple)
+contrasts(apple$user_rating)
 table(apple$user_rating)
 ```
 
@@ -124,7 +125,7 @@ apple %>% mutate(user_rating = factor(user_rating),
 ```
 
 
-## CART (caret package)
+## Methods
 
 ```{r}
 library(rpart) # for recursive partition (CART: Classfification and Regression Tree)
@@ -139,50 +140,114 @@ library(pdp) # create partial dependence plot
 library(lime)
 ```
 
-### regression tree
+### CART: regression tree 
+use only caret package to tune
 
-tune Cp
 ```{r}
-ctrl <- trainControl(method = "cv") # very slow
+ctrl1 = trainControl(method = "cv", number = 10) # very slow
+```
+
+Tune Cp: best = 0.002
+```{r}
 set.seed(1234)
 # tune over cp, method = "rpart"
 rpart.fit <- train(user_rating~., train_data1, 
                    method = "rpart",
-                   tuneGrid = data.frame(cp = exp(seq(-6,-2, length = 20))), # try many values here
-                   trControl = ctrl)
+                   tuneGrid = data.frame(cp = exp(seq(-10,-4, length = 20))), # try many values here
+                   trControl = ctrl1)
 ggplot(rpart.fit, highlight = TRUE)
-rpart.fit$bestTune # 0.00378
+rpart.fit$bestTune # 0.002
 rpart.plot(rpart.fit$finalModel)
 ```
 
-tune maximum depth
+tune maximum depth : best = 5
 ```{r}
 set.seed(1234)
 rpart2.fit <- train(user_rating~., train_data1, 
                    method = "rpart2",
-                   tuneGrid = data.frame(maxdepth = 1:7), 
-                   trControl = ctrl)
+                   tuneGrid = data.frame(maxdepth = 1:10), 
+                   trControl = ctrl1)
 ggplot(rpart2.fit, highlight = TRUE)
 rpart2.fit$bestTune # depth = 5
 rpart.plot(rpart2.fit$finalModel)
 ```
 
-Conditional inference tree: tune `mincriterion` (1-alpha)
+### Conditional inference tree (regression)
+
+stopping criterion is p value; at each step, the splitting rule is selected as the variable with strongest association with response. 
+*  pros: Avoid variable selection bias towards predictors with many possible cut points; ensures the right size tree is grown without additional pruning or cross validation, 
+*  cons: can stop early. 
+Tune: `mincriterion` (1- p.value)  
+
 ```{r}
 set.seed(1234)
-ctree.fit <- train(factor(user_rating)~., train_data, 
+ctree.fit <- train(user_rating~., train_data1, 
                    method = "ctree",
-                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-6, -2, length = 20))),
-                   trControl = ctrl)
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-7, -2, length = 30))),
+                   trControl = ctrl1)
 ggplot(ctree.fit, highlight = TRUE)
+ctree.fit$bestTune # 1 - p.value = 0.932
 plot(ctree.fit$finalModel)
 ```
 
 
-### classfication tree
+### CART: classfication tree 
+
+use caret package only
+
+Tune Cp
+```{r}
+ctrl2 <- trainControl(method = "cv",
+                     summaryFunction = twoClassSummary, # use ROC curve as summary
+                     classProbs = TRUE)
+
+set.seed(1234)
+rpart.fit.bin <- train(user_rating~., apple, 
+                   subset = trRows,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-3, len = 30))), 
+                   trControl = ctrl2,
+                   metric = "ROC")
+
+ggplot(rpart.fit.bin, highlight = TRUE)
+rpart.fit.bin$bestTune # cp = 0.0037, treesize = 7
+rpart.fit.bin$finalModel$cptable # look at the last row : treesize = nsplit + 1 = 6 + 1
+rpart.plot(rpart.fit.bin$finalModel) 
+```
+
+### Conditional Inference tree (classifcation)
+
+```{r}
+set.seed(1234)
+ctree.fit.bin <- train(user_rating~., apple, 
+                   subset = trRows,
+                   method = "ctree",
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-4, -1, length = 30))), # 1-alpha
+                   metric = "ROC",
+                   trControl = ctrl2)
+ggplot(ctree.fit.bin, highlight = TRUE)
+ctree.fit.bin$bestTune # 1- p.value = 0.894
+plot(ctree.fit.bin$finalModel)
+```
+
+### predict on test data (regression)
+
+```{r}
+rpart.pred <- predict.train(rpart.fit, newdata = apple1[-trRows,]) # CART tree: Cp
+rpart.pred2 <- predict.train(rpart2.fit, newdata = apple1[-trRows,]) # CART tree: maximum depth
+ctree.pred <- predict.train(ctree.fit, newdata = apple1[-trRows,]) # ctree
+```
 
 
+### predict on test data (classification)
 
-
+```{r}
+# predict on further tuning on cost complexity
+rpart.pred.bin <- predict(rpart.fit.bin, newdata = apple[-trRows,], 
+                      type = "prob")[,1] # probability
+# predict on ctree
+rpartc.pred.bin <- predict(ctree.fit.bin, newdata = apple[-trRows,],
+                       type = "prob")[,1]
+```
 
 
