@@ -102,7 +102,7 @@ overall user rating is left skewed; recode into binary variable as either high r
 
 #Bagging
 ```{r}
-bag.grid <- expand.grid(mtry = 8, splitrule = "variance", min.node.size = 1:300) 
+bag.grid <- expand.grid(mtry = 8, splitrule = "gini", min.node.size = 1:6) 
 set.seed(1234)
 
 bag.fit <- train(user_rating~., train_data2, method = "ranger", tuneGrid = bag.grid, trControl = ctrl2)
@@ -272,7 +272,7 @@ gbm.perf(bst, method = "cv")
 ```{r}
 
 # Try more
-gbm.grid <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:6,
+gbm.grid <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:10,
                         shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
 set.seed(1234)
 gbm.fit <- train(user_rating~., train_data2,
@@ -286,6 +286,25 @@ ggplot(gbm.fit, highlight = TRUE)
 gbm.fit$bestTune
 
 summary(gbm.fit$finalModel, las = 2, cBars = 8, cex.names = 0.8)
+```
+
+```{r}
+
+# Try more
+gbm.grid3 <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:10,
+                        shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
+set.seed(1234)
+gbm.fit3 <- train(user_rating~., train_data2,
+                 method = "gbm",
+                 distribution = "adaboost",
+                 tuneGrid = gbm.grid3,
+                 trControl = ctrl2,
+                 metric = "ROC",
+                 verbose = FALSE)
+ggplot(gbm.fit3, highlight = TRUE)
+gbm.fit3$bestTune
+
+summary(gbm.fit3$finalModel, las = 2, cBars = 8, cex.names = 0.8)
 ```
 
 ```{r}
@@ -304,34 +323,6 @@ gbm.fit2$bestTune
 summary(gbm.fit2$finalModel, las = 2, cBars = 8, cex.names = 0.8)
 ```
 
-#Compare models
-
-```{r}
-set.seed(1234)
-# tune over cp, method = "rpart" 
-rpart.fit2 <- train(user_rating~., train_data1,
-                   method = "rpart",
-                   tuneGrid = data.frame(cp = exp(seq(-8,-2, length = 20))), trControl = ctrl1)
-
-resamp2 <- resamples(list(rpart = rpart.fit2,bag = bag.fit2, rf = rf.fit2, gbm = gbm.fit2)) 
-summary(resamp2)
-bwplot(resamp2, metric = "RMSE")
-```
-
-```{r}
-rpart.pred.label <- predict(rpart.fit, test_data)
-table(rpart.pred.label, test_data)
-rpart.pred.label2 <- predict(rpart.fit2, test_data1) 
-table(rpart.pred.label, test_data1)
-rf.pred.label <- predict(rf.fit, newdata = test_data) 
-table(rf.pred.label, test_data)
-rf.pred.label2 <- predict(rf.fit2, newdata = test_data1) 
-table(rf.pred.label2, test_data)
-gbmB.pred.label <- predict(gbm.fit, newdata = test_data) 
-table(gbmB.pred.label, test_data)
-gbmB.pred.label2 <- predict(gbm.fit2, newdata = test_data1) 
-table(gbmB.pred.label2, test_data)
-```
 
 
 ```{r, echo=F}
@@ -512,10 +503,18 @@ plot(ctree.fit.bin$finalModel)
 rpart.pred <- predict.train(rpart.fit, newdata = apple21[-trRows,]) # CART tree: Cp
 rpart.pred2 <- predict.train(rpart2.fit, newdata = apple21[-trRows,]) # CART tree: maximum depth
 ctree.pred <- predict.train(ctree.fit, newdata = apple21[-trRows,]) # ctree
+bag.pred <- predict.train(bag.fit, newdata = apple21[-trRows,]) # Bagging
 rf.pred <- predict.train(rf.fit2, newdata = apple21[-trRows,]) # Random Forest
 gbm.pred <- predict.train(gbm.fit2, newdata = apple21[-trRows,]) # Boosting
 ```
 
+#Compare models:training error/RMSE comparison
+
+```{r}
+resamp2 <- resamples(list(rpart = rpart.fit, rpart2 = rpart.fit2,bag = bag.fit2, rf = rf.fit2, gbm = gbm.fit2)) 
+summary(resamp2)
+bwplot(resamp2, metric = "RMSE")
+```
 
 ### predict on test data (classification)
 
@@ -529,8 +528,12 @@ rpartc.pred.bin <- predict(ctree.fit.bin, newdata = apple2[-trRows,],
 # predict on random forest
 rf.pred.bin <- predict(rf.fit, newdata = apple2[-trRows,], 
                       type = "prob")[,1] # probability
-# predict on boosting
+# predict on Binomial loss boosting
 gbm.pred.bin <- predict(gbm.fit, newdata = apple2[-trRows,],
+                       type = "prob")[,1]
+
+# predict on Ada boosting
+gbm3.pred.bin <- predict(gbm.fit3, newdata = apple2[-trRows,],
                        type = "prob")[,1]
 ```
 
@@ -538,15 +541,17 @@ gbm.pred.bin <- predict(gbm.fit, newdata = apple2[-trRows,],
 roc.rpart <- roc(apple2$user_rating[-trRows], rpart.pred.bin) 
 roc.rpartc <- roc(apple2$user_rating[-trRows], rpartc.pred.bin) 
 roc.rf <- roc(apple2$user_rating[-trRows], rf.pred.bin) 
-roc.gbm <- roc(apple2$user_rating[-trRows], gbm.pred.bin) 
+roc.gbm <- roc(apple2$user_rating[-trRows], gbm.pred.bin)
+roc.gbm3 <- roc(apple2$user_rating[-trRows], gbm3.pred.bin) 
 
 plot(roc.rpart)
 plot(roc.rpartc, add = TRUE, col = 2) 
-plot(roc.rf, add = TRUE, col = 4) 
-plot(roc.gbm, add = TRUE, col = 5) 
+plot(roc.rf, add = TRUE, col = 3) 
+plot(roc.gbm, add = TRUE, col = 4) 
+plot(roc.gbm3, add = TRUE, col = 5)
 
-auc <- c(roc.rpart$auc[1], roc.rpartc$auc[1], roc.rf$auc[1], roc.gbm$auc[1])
-modelNames <- c("rpart","ctree","rf","gbm") 
-legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)), col = 1:6, lwd = 2)
+auc <- c(roc.rpart$auc[1], roc.rpartc$auc[1], roc.rf$auc[1], roc.gbm$auc[1], roc.gbm3$auc[1])
+modelNames <- c("rpart","ctree","rf","gbm","gbmA") 
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)), col = 1:5, lwd = 2)
 ```
 
