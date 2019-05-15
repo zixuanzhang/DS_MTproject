@@ -11,6 +11,8 @@ library(tidyverse)
 library(caret)
 library(pROC)
 library(AppliedPredictiveModeling)
+library(mgcv)
+library(MASS)
 ```
 
 ##Data import & cleaning
@@ -70,8 +72,6 @@ apple %>%
   ggplot(aes(x = user_rating)) +
   geom_bar()
 
-
-
 transparentTheme(trans = .4)
 featurePlot(x = apple[, c(2:4, 7:9)], 
             y = apple$user_rating,
@@ -108,7 +108,7 @@ plot(smooth(roc.glm), col = 4, add = TRUE)
 ```
 
 For comparison, fit logistic regression using caret
-```{r}
+```{r, warning=FALSE}
 set.seed(1234)
 model.glm <- train(x = train_data[2:9],
                    y = train_data$user_rating,
@@ -120,7 +120,7 @@ model.glm <- train(x = train_data[2:9],
 Consider penalization, do regularized logistic regression with glmnet, select the optimal tuning parameters
 ```{r}
 glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
-                        .lambda = exp(seq(-6, -2, length = 20)))
+                        .lambda = exp(seq(-8, -5, length = 20)))
 set.seed(1234)
 model.glmn <- train(x = x_train,
                     y = y_train,
@@ -129,12 +129,61 @@ model.glmn <- train(x = x_train,
                     metric = "ROC",
                     trControl = ctrl2)
 
+model.glmn$bestTune
+
 plot(model.glmn, xTrans = function(x) log(x))   
 ```
 
 #### 1b. GAM: consider non-linear covariates
 ```{r}
+# Start with linear model; do not assume nonlinear trait
+gam.m1 <- gam(user_rating ~ size_megabytes + price + 
+                user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + lang_num , 
+              data = train_data,
+              family = binomial) 
+summary(gam.m1)
 
+# add one non-linear component to size bytes
+gam.m2 <- gam(user_rating ~ s(size_megabytes) + price +
+                user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + lang_num, 
+              data = train_data,
+              family = binomial)
+summary(gam.m2) 
+
+#  add one non-linear component to lang_num
+gam.m3 <- gam(user_rating ~ s(size_megabytes) + price + 
+                user_rating_ver + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + s(lang_num), 
+              data = train_data,
+              family = binomial)
+
+# add one non-linear component to user rating of current version
+gam.m4 <- gam(user_rating ~ s(size_megabytes) + price + 
+                s(user_rating_ver, k = 9) + cont_rating + prime_genre + sup_devices_num +
+                ipad_sc_urls_num + s(lang_num), 
+              data = train_data,
+              family = binomial)
+
+anova(gam.m1, gam.m2, gam.m3, gam.m4, test = "F")
+
+
+
+test.pred.prob  <- predict(gam.m4, newdata = test_data,
+                           type = "response")
+test.pred <- rep("low", length(test.pred.prob))
+test.pred[test.pred.prob > 0.5] <- "high" #Bayes classifier (cutoff 0.5)
+
+#Evaluate performance on the test data
+confusionMatrix(data = factor(test.pred, levels = c("low", "high")),
+                reference = test_data$user_rating,
+                positive = "high")
+
+#Plot the test ROC curve
+roc.glm <- roc(test_data$user_rating, test.pred.prob)
+plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glm), col = 4, add = TRUE)
 ```
 
 #### 2a. Linear discriminate analysis (LDA)
@@ -142,19 +191,66 @@ plot(model.glmn, xTrans = function(x) log(x))
 -Adv: So consider discriminant alaysis, for more than 2 classes, low-dimension views (good when have large p)
 * assume X normally distributed within each class, assume covariance are the same across classes
 ```{r}
+lda.fit <- lda(user_rating~., data = train_data)
+plot(lda.fit)
 
+#Evaluate the test set performance using ROC
+lda.pred <- predict(lda.fit, newdata = test_data)
+head(lda.pred$posterior)
+
+roc.lda <- roc(y_test, lda.pred$posterior[,2], #probability of being positive
+               levels = c("low", "high"))
+
+plot(roc.lda, legacy.axes = TRUE, print.auc = TRUE)
+```
+
+Fit LDA with Caret for model comparison
+```{r}
+set.seed(1234)
+model.lda <- train(x = x_train,
+                   y = y_train,
+                   method = "lda",
+                   metric = "ROC",
+                   trControl = ctrl2)
 ```
 
 #### 2b. Quadratic Discriminate analysis (QDA)
 * No equal covariance assumption
 ```{r}
+# use qda() in MASS
+qda.fit <- qda(user_rating~., data = train_data)
 
+qda.pred <- predict(qda.fit, newdata = test_data)
+head(qda.pred$posterior)
+```
+
+For model comparison
+```{r}
+set.seed(1234)
+model.qda <- train(x = x_train,
+                   y = y_train,
+                   method = "qda",
+                   metric = "ROC",
+                   trControl = ctrl2)
 ```
 
 #### 3. Naivew Bayes
 * good for large p, works for mixed p (continuous, categorical)
-```{r}
+```{r, warning=FALSE}
+set.seed(1234)
 
+nbGrid <- expand.grid(usekernel = c(FALSE,TRUE),
+                      fL = 1, 
+                      adjust = seq(0,5,by = 1))
+
+model.nb <- train(x = x_train,
+                  y = y_train,
+                  method = "nb",
+                  tuneGrid = nbGrid,
+                  metric = "ROC",
+                  trControl = ctrl2)
+
+plot(model.nb)
 ```
 
 #### 4. KNN
@@ -162,9 +258,57 @@ plot(model.glmn, xTrans = function(x) log(x))
 * super flexible
 -Disadv: no assumed model form, don't know relationship btw response and predictor
 ```{r}
+set.seed(1234)
 
+model.knn <- train(x = x_train,
+                   y = y_train,
+                   method = "knn",
+                   preProcess = c("center","scale"),
+                   tuneGrid = data.frame(k = seq(1,200,by=5)),
+                   trControl = ctrl2)
+
+ggplot(model.knn)
 ```
 
+Compare models
+```{r}
+res <- resamples(list(GLM = model.glm, GLMNET = model.glmn, 
+                      LDA = model.lda, QDA = model.qda,
+                      NB = model.nb, KNN = model.knn))
+summary(res)
+bwplot(res, metric = "ROC")
+```
+
+Visualize ROCs
+```{r, eval=FALSE}
+lda.pred <- predict(model.lda, newdata = test_data, type = "prob")[,2]
+glm.pred <- predict(model.glm, newdata = test_data, type = "prob")[,2]
+glmn.pred <- predict(model.glmn, newdata = test_data, type = "prob")[,2]
+nb.pred <- predict(model.nb, newdata = test_data, type = "prob")[,2]
+qda.pred <- predict(model.qda, newdata = test_data, type = "prob")[,2]
+knn.pred <- predict(model.knn, newdata = test_data, type = "prob")[,2]
+
+
+roc.lda <- roc(y_test, lda.pred)
+roc.glm <- roc(y_test, glm.pred)
+roc.glmn <- roc(y_test, glmn.pred)
+roc.nb <- roc(y_test, nb.pred)
+roc.qda <- roc(y_test, qda.pred)
+roc.knn <- roc(y_test, knn.pred)
+
+auc <- c(roc.glm$auc[1], roc.glmn$auc[1], roc.lda$auc[1],
+         roc.qda$auc[1], roc.nb$auc[1], roc.knn$auc[1])
+
+plot(roc.glm, legacy.axes = TRUE)
+plot(roc.glmn, col = 2, add = TRUE)
+plot(roc.lda, col = 3, add = TRUE)
+plot(roc.qda, col = 4, add = TRUE)
+plot(roc.nb, col = 5, add = TRUE)
+plot(roc.knn, col = 6, add = TRUE)
+modelNames <- c("glm","glmn","lda","qda","nb","knn")
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)),
+       col = 1:6, lwd = 2)
+```
 
 
 ## Tree-based methods
