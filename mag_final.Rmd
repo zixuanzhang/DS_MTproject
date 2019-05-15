@@ -1,0 +1,188 @@
+---
+title: "mag_final"
+author: "Bingyu Sun"
+date: "5/8/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(pROC)
+library(AppliedPredictiveModeling)
+```
+
+##Data import & cleaning
+* Reclassify response variable to make it binary
+```{r}
+apple = read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+", "12+", "17+")), #ascending order
+         user_rating = ifelse(user_rating >= 4, "high", "low"),
+         user_rating = factor(user_rating, levels = c("low", "high"))) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating, and apps with no rating on current version
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) %>%
+  dplyr::select(user_rating, everything())
+
+str(apple)
+table(apple$user_rating)
+```
+
+##Split to train/test sets
+```{r}
+set.seed(1234)
+#Split data to traning and testing
+trRows = createDataPartition(apple$user_rating,
+                             p = .75,
+                             list = FALSE)
+train_data = apple[trRows,]
+test_data = apple[-trRows,]
+#in matrix form
+x_train = model.matrix(user_rating~., train_data)[,-1] 
+y_train = train_data$user_rating
+x_test = model.matrix(user_rating~., test_data)[,-1] 
+y_test = test_data$user_rating
+
+#CV method
+ctrl1 = trainControl(method = "cv", number = 10)
+ctrl2 = trainControl(method = "cv",
+                     number = 10,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+```
+
+#Supervised learning
+
+##Classification
+
+###For linear/non-linear decision boundary
+
+####EDA
+```{r}
+#barplot for response
+apple %>% 
+  ggplot(aes(x = user_rating)) +
+  geom_bar()
+
+
+
+transparentTheme(trans = .4)
+featurePlot(x = apple[, c(2:4, 7:9)], 
+            y = apple$user_rating,
+            scales = list(x = list(relation = "free"), 
+                        y = list(relation = "free")),
+            plot = "density", pch = "|", 
+            auto.key = list(columns = 2))
+```
+
+#### 1a. Logistic Regression
+* For large p, do penalization (ridge, lasso, elastic net)
+```{r}
+glm.fit <- glm(user_rating~., 
+               data = train_data, 
+               family = binomial)
+
+contrasts(train_data$user_rating)
+summary(glm.fit)
+
+test.pred.prob  <- predict(glm.fit, newdata = test_data,
+                           type = "response")
+test.pred <- rep("low", length(test.pred.prob))
+test.pred[test.pred.prob > 0.5] <- "high" #Bayes classifier (cutoff 0.5)
+
+#Evaluate performance on the test data
+confusionMatrix(data = factor(test.pred, levels = c("low", "high")),
+                reference = test_data$user_rating,
+                positive = "high")
+
+#Plot the test ROC curve
+roc.glm <- roc(test_data$user_rating, test.pred.prob)
+plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glm), col = 4, add = TRUE)
+```
+
+For comparison, fit logistic regression using caret
+```{r}
+set.seed(1234)
+model.glm <- train(x = train_data[2:9],
+                   y = train_data$user_rating,
+                   method = "glm",
+                   metric = "ROC",
+                   trControl = ctrl2)
+```
+
+Consider penalization, do regularized logistic regression with glmnet, select the optimal tuning parameters
+```{r}
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
+                        .lambda = exp(seq(-6, -2, length = 20)))
+set.seed(1234)
+model.glmn <- train(x = x_train,
+                    y = y_train,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    metric = "ROC",
+                    trControl = ctrl2)
+
+plot(model.glmn, xTrans = function(x) log(x))   
+```
+
+#### 1b. GAM: consider non-linear covariates
+```{r}
+
+```
+
+#### 2a. Linear discriminate analysis (LDA)
+-Problem for logistic regression: if two classes are widely separated, model is unstable, large variance
+-Adv: So consider discriminant alaysis, for more than 2 classes, low-dimension views (good when have large p)
+* assume X normally distributed within each class, assume covariance are the same across classes
+```{r}
+
+```
+
+#### 2b. Quadratic Discriminate analysis (QDA)
+* No equal covariance assumption
+```{r}
+
+```
+
+#### 3. Naivew Bayes
+* good for large p, works for mixed p (continuous, categorical)
+```{r}
+
+```
+
+#### 4. KNN
+* center and scale first if method is based on distance
+* super flexible
+-Disadv: no assumed model form, don't know relationship btw response and predictor
+```{r}
+
+```
+
+
+
+## Tree-based methods
+* No assumption, less strictive than linear methods, less flexible than knn
+* Good interpretation
+
+### Regression
+
+#### 1. Regression tree
+```{r}
+
+```
+
+### Classification
+
+#### 2. Classification tree
+```{r}
+
+```
+
+
