@@ -379,7 +379,7 @@ svmr.fit <- train(user_rating~., data = apple2,
                   method = "svmRadial", # from package kernal lab
                   preProcess = c("center", "scale"),
                   tuneGrid = svmr.grid,             
-                  trControl = ctrl1)
+                  trControl = ctrl2)
  
 ggplot(svmr.fit, highlight = TRUE) 
 ```
@@ -392,7 +392,16 @@ resamp <- resamples(list(CART = rpart.fit.bin, # CART tree
                           bag = bag.fit,  # bagging
                           rf = rf.fit,    # random forest
                           gbmB = gbm.fit, # bernulli boosting
-                         gbmA = gbm.fit3))  # ada
+                         gbmA = gbm.fit3,
+                         glm = model.glm,
+                         glmn = model.glmn,
+                         lda = model.lda,
+                         qda = model.qda,
+                         nb = model.nb,
+                         # distance based
+                         knn = model.knn,
+                         svml = svml.fit,
+                         svmr = svmr.fit))  
 summary(resamp)
 bwplot(resamp, metric =  "ROC")
 
@@ -402,31 +411,70 @@ bwplot(resamp.svm)
 ```
 
 
-predict on 
+## predict on test data
 ```{r}
-# predict on further tuning on cost complexity
-rpart.pred.bin <- predict(rpart.fit.bin, newdata = apple2[-trRows,], 
-                      type = "prob")[,1] # probability
-# predict on ctree
-rpartc.pred.bin <- predict(ctree.fit.bin, newdata = apple2[-trRows,],
-                       type = "prob")[,1]
-# predict on random forest
-rf.pred.bin <- predict(rf.fit, newdata = apple2[-trRows,], 
-                      type = "prob")[,1] # probability
-# predict on Binomial loss boosting
-gbm.pred.bin <- predict(gbm.fit, newdata = apple2[-trRows,],
-                       type = "prob")[,1]
+# CART tree
+rpart.pred <- predict(rpart.fit.bin, newdata = apple2[-trRows2,], type = "prob")[,2] 
+# ctree
+rpartc.pred <- predict(ctree.fit.bin, newdata = apple2[-trRows2,], type = "prob")[,2]
+# bagging
+bagging.pred <- predict(bag.fit, newdata = apple2[-trRows2,], type = "prob")[,2]
+# random forest
+rf.pred <- predict(rf.fit, newdata = apple2[-trRows2,], type = "prob")[,2] 
+# Binomial loss boosting
+gbmB.pred <- predict(gbm.fit, newdata = apple2[-trRows2,], type = "prob")[,2]
+# Ada boosting
+gbmA.pred <- predict(gbm.fit3, newdata = apple2[-trRows2,],type = "prob")[,2]
+# glm
+glm.pred <-  predict(model.glm, newdata = apple2[-trRows2,],type = "prob")[,2]
+# glmn
+glmn.pred <-  predict(model.glmn, newdata = apple2[-trRows2,],type = "prob")[,2]
+# lda
+lda.pred <-  predict(model.lda, newdata = apple2[-trRows2,],type = "prob")[,2]
+# qda
+qda.pred <-  predict(model.qda, newdata = apple2[-trRows2,],type = "prob")[,2]
+# nb
+nb.pred <- predict(model.nb, newdata = apple2[-trRows2,],type = "prob")[,2]
+```
 
-# predict on Ada boosting
-gbm3.pred.bin <- predict(gbm.fit3, newdata = apple2[-trRows,],
-                       type = "prob")[,1]
+ROC
+```{r}
+roc.rpart <- roc(apple2$user_rating[-trRows2], rpart.pred) 
+roc.rpartc <- roc(apple2$user_rating[-trRows2], rpartc.pred) 
+roc.bag <- roc(apple2$user_rating[-trRows2], bagging.pred)
+roc.rf <- roc(apple2$user_rating[-trRows2], rf.pred) 
+roc.gbmB <- roc(apple2$user_rating[-trRows2], gbmB.pred)
+roc.gbmA <- roc(apple2$user_rating[-trRows2], gbmA.pred) 
+roc.glm <- roc(apple2$user_rating[-trRows2], glm.pred)
+roc.glmn <- roc(apple2$user_rating[-trRows2], glmn.pred)
+roc.lda <- roc(apple2$user_rating[-trRows2], lda.pred)
+roc.qda <- roc(apple2$user_rating[-trRows2], qda.pred)
+roc.nb <- roc(apple2$user_rating[-trRows2], nb.pred)
 
+plot(roc.rpart)
+plot(roc.rpartc, add = TRUE, col = 2) 
+plot(roc.bag, add = TRUE, col = 3) 
+plot(roc.rf, add = TRUE, col = 4) 
+plot(roc.gbmB, add = TRUE, col = 5) 
+plot(roc.gbmA, add = TRUE, col = 6)
+plot(roc.glm, add = TRUE, col = 7)
+plot(roc.glmn, add = TRUE, col = 8)
+plot(roc.lda, add = TRUE, col = 9)
+plot(roc.qda, add = TRUE, col = 10)
+plot(roc.nb, add = TRUE, col = 11)
 
+auc <- c(roc.rpart$auc[1], roc.rpartc$auc[1], roc.bag$auc[1], roc.rf$auc[1], roc.gbmB$auc[1], roc.gbmA$auc[1],
+         roc.glm$auc[1], roc.glmn$auc[1], roc.lda$auc[1], roc.qda$auc[1], roc.nb$auc[1])
+modelNames <- c("rpart","ctree","bag","rf","gbmB","gbmA", "glm", "glmnet", "lda", "qda", "nb") 
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)), col = 1:11, lwd = 2)
 ```
 
 
 
 ## visualiza final model
 
+```{r}
+summary(gbm.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
+```
 
 
