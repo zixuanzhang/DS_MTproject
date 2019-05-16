@@ -1,0 +1,298 @@
+---
+title: "revise_laoma"
+author: "Eleanor Zhang"
+date: "5/15/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 7,fig.asp = .7,out.width = "90%",
+                      message = FALSE, warning = FALSE)
+library(tidyverse)
+library(ggridges)
+library(caret)
+library(boot)
+library(pls)
+library(glmnet)
+library(splines)
+library(mgcv)
+library(MASS)
+library(pROC)
+library(GGally)
+library(RColorBrewer)
+library(randomForest) 
+library(ranger)
+theme_set(theme_classic())
+library(gbm)
+# parallel processing with caret
+library(doParallel)
+cluster <- makePSOCKcluster(10)
+registerDoParallel(cluster)
+```
+
+## Data
+
+```{r}
+apple <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")),
+         user_rating = ifelse(user_rating >= 4, 1, 0)) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0)),
+         user_rating = as.numeric(user_rating)) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic) #vpp_lic has nearzero variance
+
+set.seed(1234)
+#Split data to traning and testing
+trRows = createDataPartition(apple$user_rating,
+                             p = .75,
+                             list = FALSE)
+train_data = apple[trRows,]
+test_data = apple[-trRows,]
+#in matrix form
+x_train = model.matrix(user_rating~., train_data)[,-1] 
+y_train = train_data$user_rating
+x_test = model.matrix(user_rating~., test_data)[,-1] 
+y_test = test_data$user_rating
+```
+
+## Tree based
+
+```{r}
+library(rpart) # for recursive partition (CART: Classfification and Regression Tree)
+library(rpart.plot) # better tool to visualze CART tree
+library(party) # conditional inference tree (stopping criterion is based on permutation test; problem of early stoppoing)
+library(partykit) # visualize party object
+library(randomForest) # random Forest; could be slow
+library(ranger) # C++ improvement on randomForest; much faster for tuning paremeter
+library(gbm) # gradient boosting machine (boosting)
+library(plotmo) 
+library(pdp) # create partial dependence plot
+library(lime)
+```
+
+CV methods
+```{r}
+ctrl1 <- trainControl(method = "cv", number = 10)
+ctrl2 <- trainControl(method = "cv",
+                     summaryFunction = twoClassSummary, # use ROC curve as summary
+                     classProbs = TRUE)
+```
+
+### CART and CIT (caret)
+
+change outcome to factor and new names
+```{r}
+apple2 <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+")),
+         user_rating = factor(ifelse(user_rating >= 4, "high", "med.low"), levels = c("med.low","high"))) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic)
+
+set.seed(1234)
+#Split data to traning and testing
+trRows2 = createDataPartition(apple2$user_rating,
+                             p = .75,
+                             list = FALSE)
+```
+
+CART classfication tree
+```{r}
+set.seed(1234)
+rpart.fit.bin <- train(user_rating~., apple2, 
+                   subset = trRows2,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-3, len = 30))), 
+                   trControl = ctrl2,
+                   metric = "ROC")
+
+ggplot(rpart.fit.bin, highlight = TRUE)
+rpart.fit.bin$bestTune # cp = 0.0037, treesize = 7
+rpart.fit.bin$finalModel$cptable 
+rpart.plot(rpart.fit.bin$finalModel) 
+```
+
+CIT
+```{r}
+set.seed(1234)
+ctree.fit.bin <- train(user_rating~., apple2, 
+                   subset = trRows2,
+                   method = "ctree",
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-4, -1, length = 30))), # 1-alpha
+                   metric = "ROC",
+                   trControl = ctrl2)
+ggplot(ctree.fit.bin, highlight = TRUE)
+ctree.fit.bin$bestTune # 1- p.value = 0.894
+plot(ctree.fit.bin$finalModel)
+```
+
+### bagging 
+
+bagging: caret package
+```{r}
+bag.grid <- expand.grid(mtry = 8, splitrule = "gini", min.node.size = 1:6) 
+set.seed(1234)
+
+bag.fit <- train(user_rating~., apple2, 
+                 subset = trRows2, 
+                 method = "ranger", 
+                 tuneGrid = bag.grid, 
+                 trControl = ctrl2)
+ggplot(bag.fit, highlight = TRUE)
+
+bag.fit$bestTune
+```
+
+bagging: ranger package
+```{r}
+set.seed(1234)
+rf.final.per <- ranger(user_rating~., apple2[trRows2,],
+                        mtry = 2, splitrule = "gini",
+                        min.node.size = 6,
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(rf.final.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB for Binary outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+
+set.seed(1234)
+rf.final.imp <- ranger(user_rating~., apple2[trRows2,],
+                        mtry = 2, splitrule = "gini",
+                        min.node.size = 6,
+                        importance = "impurity")
+barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS) for Binary outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+### random forest
+
+caret 
+```{r}
+# Try more if possible
+rf.grid <- expand.grid(mtry = 1:8,
+                       splitrule = "gini",
+                       min.node.size = 1:6)
+set.seed(1234)
+rf.fit <- train(user_rating~., apple2,
+                subset = trRows2,
+                method = "ranger",
+                tuneGrid = rf.grid,
+                metric = "ROC",
+                trControl = ctrl2)
+
+ggplot(rf.fit, highlight = TRUE)
+rf.fit$bestTune
+```
+
+ranger
+```{r}
+set.seed(1234)
+rf.final.per <- ranger(user_rating~., apple2[trRows2,],
+                        mtry = 2, splitrule = "gini",
+                        min.node.size = 6,
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(rf.final.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Permutation OOB for Binary outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+
+set.seed(1234)
+rf.final.imp <- ranger(user_rating~., apple2[trRows2,],
+                        mtry = 2, splitrule = "gini",
+                        min.node.size = 6,
+                        importance = "impurity")
+barplot(sort(ranger::importance(rf.final.imp), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7, main = "Impurity (RSS) for Binary outcome/response",
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(8))
+```
+
+### boosting & adaboost
+
+boosting (caret)
+```{r}
+# Try more
+gbm.grid <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:10,
+                        shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
+set.seed(1234)
+gbm.fit <- train(user_rating~., apple2, subset = trRows2,
+                 method = "gbm",
+                 distribution = "bernoulli",
+                 tuneGrid = gbm.grid,
+                 trControl = ctrl2,
+                 metric = "ROC",
+                 verbose = FALSE)
+ggplot(gbm.fit, highlight = TRUE)
+gbm.fit$bestTune
+
+summary(gbm.fit$finalModel, las = 2, cBars = 8, cex.names = 0.8)
+```
+
+adaboost (caret)
+```{r}
+gbm.grid3 <- expand.grid(n.trees = c(2000, 3000, 4000), interaction.depth = 1:10,
+                        shrinkage = c(0.001,0.003,0.005), n.minobsinnode = 1)
+set.seed(1234)
+gbm.fit3 <- train(user_rating~., apple2, subset = trRows2,
+                 method = "gbm",
+                 distribution = "adaboost",
+                 tuneGrid = gbm.grid3,
+                 trControl = ctrl2,
+                 metric = "ROC",
+                 verbose = FALSE)
+ggplot(gbm.fit3, highlight = TRUE)
+gbm.fit3$bestTune
+
+summary(gbm.fit3$finalModel, las = 2, cBars = 8, cex.names = 0.8)
+```
+
+### SVM (caret)
+
+linear: SVM linear
+```{r}
+library(e1071)
+set.seed(1234)
+svml.fit <- train(user_rating~., 
+                  data = apple2,
+                  subset = trRows2,
+                  method = "svmLinear2", # use method from e1017 package; linear SVM
+                  preProcess = c("center", "scale"), # very important
+                  tuneGrid = data.frame(cost = exp(seq(-5,2,len=30))),
+                  trControl = ctrl1)
+
+ggplot(svml.fit, highlight = TRUE) # use accuracy and Kappa to evaluate; no probability; no ROC curve
+svml.fit$bestTune # 0.66
+```
+
+radial kernel: nonlinear SVM
+```{r}
+# try as much as possible the tuning grid
+svmr.grid <- expand.grid(C = exp(seq(-5,2,len=20)),
+                         sigma = exp(seq(-8,-3,len=5))) # gamma in SVM function
+set.seed(1234)             
+svmr.fit <- train(user_rating~., data = apple2, 
+                  subset = trRows2,
+                  method = "svmRadial", # from package kernal lab
+                  preProcess = c("center", "scale"),
+                  tuneGrid = svmr.grid,             
+                  trControl = ctrl1)
+ 
+ggplot(svmr.fit, highlight = TRUE) 
+```
+
+## compare across methods
+
+## visualiza final model
+
+
+

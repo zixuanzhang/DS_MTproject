@@ -102,7 +102,7 @@ featurePlot(x = apple[, c(1,2,4,7,8,9)], # all features are numeric
                         y = list(relation="free")), # set both x and y scales to be free
             plot = "density", # density plot for each variable; 
             pch = "|",  # set the marker
-            auto.key = list(columns = 2))
+            auto.key = list(columns = 3))
 ```
 
 categorical
@@ -113,15 +113,12 @@ apple %>% mutate(user_rating = factor(user_rating),
   group_by(user_rating, prime_genre, cont_rating) %>% 
   summarize(n = n()) %>% 
   ggplot(aes(x = cont_rating, y = n))+
-  geom_bar(
-    aes(fill = factor(prime_genre)), stat = "identity", color = "white",
-    position = position_dodge(0.9)
-    )+
-  facet_wrap(~user_rating) + 
-  fill_palette("jco") + 
-  labs(title="frequency of user rating category by content level and prime genre", 
-       subtitle = "0: medium/low rating, 1: high rating",
-         x="Content rating level")
+  geom_bar(aes(fill = prime_genre), stat = "identity", color = "white",
+        position = position_dodge(0.9)) + facet_wrap(~user_rating) + fill_palette("jco") +
+  labs(x = "content rating") +
+  scale_fill_discrete(name="Primary Genre of app",
+                         breaks=c("0", "1"),
+                         labels=c("NonGames", "Games"))
 ```
 
 
@@ -230,6 +227,105 @@ ctree.fit.bin$bestTune # 1- p.value = 0.894
 plot(ctree.fit.bin$finalModel)
 ```
 
+### SVM (caret)
+
+
+linear: SVM linear
+```{r}
+library(e1071)
+set.seed(1234)
+svml.fit <- train(user_rating~., 
+                  data = apple[trRows,], 
+                  method = "svmLinear2", # use method from e1017 package; linear SVM
+                  preProcess = c("center", "scale"), # very important
+                  tuneGrid = data.frame(cost = exp(seq(-5,2,len=30))),
+                  trControl = ctrl1)
+
+ggplot(svml.fit, highlight = TRUE) # use accuracy and Kappa to evaluate; no probability; no ROC curve
+svml.fit$bestTune # 1.363895
+```
+
+radial kernel: nonlinear SVM
+```{r}
+# try as much as possible the tuning grid
+svmr.grid <- expand.grid(C = exp(seq(-5,2,len=20)),
+                         sigma = exp(seq(-8,-3,len=5))) # gamma in SVM function
+set.seed(1234)             
+svmr.fit <- train(user_rating~., apple, 
+                  subset = trRows,
+                  method = "svmRadial", # from package kernal lab
+                  preProcess = c("center", "scale"),
+                  tuneGrid = svmr.grid,             
+                  trControl = ctrl1)
+ 
+ggplot(svmr.fit, highlight = TRUE) 
+```
+
+### SVM (for plot)
+
+linear boundary
+```{r}
+set.seed(1234)
+# use CV to select
+linear.tune <- tune.svm(user_rating~., 
+                        data = apple[trRows,], 
+                        kernel = "linear",  # no transformation; linear boundaries; 
+                        cost = exp(seq(-5,2,len=30))) # one tuning parameter C
+summary(linear.tune)
+plot(linear.tune) # look at CV result
+
+best.linear <- linear.tune$best.model # extract best model
+summary(best.linear) # look at the best model; C classfication
+
+# get predicted label
+pred.linear <- predict(best.linear, newdata = apple[-trRows,])
+pred.linear
+# SVM does not provide estimated probability, so we will use matrix:
+
+# look at prediction performance by accuracy and Kappa measures
+confusionMatrix(data = pred.linear, 
+                reference = apple$user_rating[-trRows]) # accuracy = 0.8533
+
+plot(best.linear, apple[trRows,], # plot SVM object
+     size_megabytes~user_rating_ver, # pick 2 predictors to plot
+     slice = list(price = 3.99, cont_rating = "4+", # fix 6 other covariates such as to visualize
+                  prime_genre = 0, sup_devices_num = 36,
+                  ipad_sc_urls_num = 5, lang_num = 5),
+                  symbolPalette = c("orange","darkblue"), # change the color of data points
+                  color.palette = terrain.colors)
+```
+
+radial boundary
+```{r}
+set.seed(1234)
+# 10 fold validation; center and scale by default
+radial.tune <- tune.svm(user_rating~., 
+                        data = apple[trRows,], 
+                        kernel = "radial", 
+                        cost = exp(seq(-5,2,len=20)), # for all SVM method
+                        gamma = exp(seq(-8,-3,len=5))) # for radial kernel parameter
+
+summary(radial.tune)
+plot(radial.tune)
+
+best.radial <- radial.tune$best.model
+summary(best.radial) # best model
+
+pred.radial <- predict(best.radial, newdata = dat[-rowTrain,])
+
+# look at accuracy of this model
+confusionMatrix(data = pred.radial, 
+                reference = dat$diabetes[-rowTrain]) # better than linear kernel
+
+plot(best.radial, dat[rowTrain,], glucose~pressure,
+     slice = list(pregnant = 5, triceps = 20,
+                  insulin = 20, mass = 25,
+                  pedigree = 1, age = 40),
+     symbolPalette = c("orange","darkblue"),
+     color.palette = terrain.colors)
+     
+```
+
 ### predict on test data (regression)
 
 ```{r}
@@ -289,11 +385,12 @@ fviz_nbclust(dat1,
              FUNcluster = kmeans,
              method = "silhouette") # three methods can be used; 
 set.seed(1234) # the initial group assignment matters
-km <- kmeans(dat1, centers = 6, nstart = 20) # try 20 different initial values
+km <- kmeans(dat1, centers = 3, nstart = 20) # try 20 different initial values
 
 km_vis <- fviz_cluster(list(data = dat1, cluster = km$cluster),  
                        ellipse.type = "convex", # boundary shapes
-                       geom = c("point","text"), # add pokemon names
+                       geom = "point",
+                       #geom = c("point","text"),
                        labelsize = 5, 
                        palette = "Dark2") + labs(title = "K-means") 
 
@@ -315,7 +412,7 @@ hc.centroid <- hclust(dist(dat1), method = "centroid")
 dendrogram
 
 ```{r}
-fviz_dend(hc.complete, k = 6,   # make cut at forming 4 clusters    
+fviz_dend(hc.complete, k = 3,   # make cut at forming 2 clusters    
           cex = 0.3, 
           palette = "jco", 
           color_labels_by_k = TRUE, # color the label
