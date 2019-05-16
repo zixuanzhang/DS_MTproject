@@ -32,6 +32,7 @@ registerDoParallel(cluster)
 
 ## Data
 
+numeric binary outcome
 ```{r}
 apple <- read_csv("./data/AppleStore.csv") %>%
   janitor::clean_names() %>%
@@ -60,31 +61,6 @@ x_test = model.matrix(user_rating~., test_data)[,-1]
 y_test = test_data$user_rating
 ```
 
-## Tree based
-
-```{r}
-library(rpart) # for recursive partition (CART: Classfification and Regression Tree)
-library(rpart.plot) # better tool to visualze CART tree
-library(party) # conditional inference tree (stopping criterion is based on permutation test; problem of early stoppoing)
-library(partykit) # visualize party object
-library(randomForest) # random Forest; could be slow
-library(ranger) # C++ improvement on randomForest; much faster for tuning paremeter
-library(gbm) # gradient boosting machine (boosting)
-library(plotmo) 
-library(pdp) # create partial dependence plot
-library(lime)
-```
-
-CV methods
-```{r}
-ctrl1 <- trainControl(method = "cv", number = 10)
-ctrl2 <- trainControl(method = "cv",
-                     summaryFunction = twoClassSummary, # use ROC curve as summary
-                     classProbs = TRUE)
-```
-
-### CART and CIT (caret)
-
 change outcome to factor and new names
 ```{r}
 apple2 <- read_csv("./data/AppleStore.csv") %>%
@@ -105,6 +81,124 @@ trRows2 = createDataPartition(apple2$user_rating,
                              p = .75,
                              list = FALSE)
 ```
+
+CV methods
+```{r}
+ctrl1 <- trainControl(method = "cv", number = 10)
+ctrl2 <- trainControl(method = "cv",
+                     summaryFunction = twoClassSummary, # use ROC curve as summary
+                     classProbs = TRUE)
+```
+
+## Decision Boundaries
+
+### logistic regression
+
+prepare data
+```{r}
+str(apple)
+apple <- apple %>% dplyr::select(user_rating, everything())
+apple2 <- apple2 %>% dplyr::select(user_rating, everything())
+
+set.seed(1234)
+model.glm <- train(user_rating ~., data = apple2,
+                   subset = trRows2,
+                   method = "glm",
+                   metric = "ROC",
+                   trControl = ctrl2)
+summary(model.glm)
+```
+
+### glmnet
+
+```{r}
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
+                        .lambda = exp(seq(-8, -5, length = 20)))
+set.seed(1234)
+model.glmn <- train(user_rating ~., data = apple2,
+                    subset = trRows2,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    metric = "ROC",
+                    trControl = ctrl2)
+
+model.glmn$bestTune
+
+plot(model.glmn, xTrans = function(x) log(x), highlight = TRUE) 
+```
+
+### gam 
+
+### LDA and QDA
+
+LDA
+```{r}
+set.seed(1234)
+model.lda <- train(user_rating ~., data = apple2,
+                  subset = trRows2,
+                   method = "lda",
+                   metric = "ROC",
+                   trControl = ctrl2)
+```
+
+QDA
+```{r}
+set.seed(1234)
+model.qda <- train(user_rating ~., data = apple2,
+                   subset = trRows2,
+                   method = "qda",
+                   metric = "ROC",
+                   trControl = ctrl2)
+```
+
+### Naive Bayes
+```{r}
+set.seed(1234)
+nbGrid <- expand.grid(usekernel = c(FALSE,TRUE),
+                      fL = 1, 
+                      adjust = seq(0,5,by = 1))
+
+model.nb <- train(user_rating ~., data = apple2,
+                  subset = trRows2,
+                  method = "nb",
+                  tuneGrid = nbGrid,
+                  metric = "ROC",
+                  trControl = ctrl2)
+
+plot(model.nb)
+```
+
+### KNN
+
+```{r}
+set.seed(1234)
+model.knn <- train(user_rating ~., data = apple2,
+                   subset = trRows2,
+                   method = "knn",
+                   preProcess = c("center","scale"),
+                   tuneGrid = data.frame(k = seq(1,200,by=5)),
+                   trControl = ctrl2)
+
+ggplot(model.knn)
+```
+
+
+## Tree based
+
+```{r}
+library(rpart) # for recursive partition (CART: Classfification and Regression Tree)
+library(rpart.plot) # better tool to visualze CART tree
+library(party) # conditional inference tree (stopping criterion is based on permutation test; problem of early stoppoing)
+library(partykit) # visualize party object
+library(randomForest) # random Forest; could be slow
+library(ranger) # C++ improvement on randomForest; much faster for tuning paremeter
+library(gbm) # gradient boosting machine (boosting)
+library(plotmo) 
+library(pdp) # create partial dependence plot
+library(lime)
+```
+
+### CART and CIT (caret)
 
 CART classfication tree
 ```{r}
@@ -153,7 +247,7 @@ ggplot(bag.fit, highlight = TRUE)
 bag.fit$bestTune
 ```
 
-bagging: ranger package
+bagging: ranger package (for variable of importance)
 ```{r}
 set.seed(1234)
 rf.final.per <- ranger(user_rating~., apple2[trRows2,],
@@ -195,7 +289,7 @@ ggplot(rf.fit, highlight = TRUE)
 rf.fit$bestTune
 ```
 
-ranger
+ranger (for variable of importance)
 ```{r}
 set.seed(1234)
 rf.final.per <- ranger(user_rating~., apple2[trRows2,],
@@ -291,6 +385,46 @@ ggplot(svmr.fit, highlight = TRUE)
 ```
 
 ## compare across methods
+
+```{r}
+resamp <- resamples(list(CART = rpart.fit.bin, # CART tree
+                          CIT = ctree.fit.bin, # CIT tree
+                          bag = bag.fit,  # bagging
+                          rf = rf.fit,    # random forest
+                          gbmB = gbm.fit, # bernulli boosting
+                         gbmA = gbm.fit3))  # ada
+summary(resamp)
+bwplot(resamp, metric =  "ROC")
+
+resamp.svm <- resamples(list(svmr = svmr.fit, svml = svml.fit))
+summary(resamp.svm)
+bwplot(resamp.svm)
+```
+
+
+predict on 
+```{r}
+# predict on further tuning on cost complexity
+rpart.pred.bin <- predict(rpart.fit.bin, newdata = apple2[-trRows,], 
+                      type = "prob")[,1] # probability
+# predict on ctree
+rpartc.pred.bin <- predict(ctree.fit.bin, newdata = apple2[-trRows,],
+                       type = "prob")[,1]
+# predict on random forest
+rf.pred.bin <- predict(rf.fit, newdata = apple2[-trRows,], 
+                      type = "prob")[,1] # probability
+# predict on Binomial loss boosting
+gbm.pred.bin <- predict(gbm.fit, newdata = apple2[-trRows,],
+                       type = "prob")[,1]
+
+# predict on Ada boosting
+gbm3.pred.bin <- predict(gbm.fit3, newdata = apple2[-trRows,],
+                       type = "prob")[,1]
+
+
+```
+
+
 
 ## visualiza final model
 
