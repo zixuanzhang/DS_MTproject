@@ -22,6 +22,7 @@ library(GGally)
 library(RColorBrewer)
 library(randomForest) 
 library(ranger)
+library(ggpubr)
 theme_set(theme_classic())
 library(gbm)
 # parallel processing with caret
@@ -89,6 +90,24 @@ ctrl2 <- trainControl(method = "cv",
                      summaryFunction = twoClassSummary, # use ROC curve as summary
                      classProbs = TRUE)
 ```
+
+## EDA
+```{r}
+apple2 %>% 
+  ggplot(aes(x = user_rating)) +
+  geom_bar()
+
+transparentTheme(trans = .4)
+featurePlot(x = apple[, c(2:4, 7:9)], 
+            y = apple$user_rating,
+            scales = list(x = list(relation = "free"), 
+                        y = list(relation = "free")),
+            plot = "density", pch = "|", 
+            auto.key = list(columns = 2))
+
+
+```
+
 
 ## Decision Boundaries
 
@@ -379,7 +398,7 @@ svmr.fit <- train(user_rating~., data = apple2,
                   method = "svmRadial", # from package kernal lab
                   preProcess = c("center", "scale"),
                   tuneGrid = svmr.grid,             
-                  trControl = ctrl2)
+                  trControl = ctrl1)
  
 ggplot(svmr.fit, highlight = TRUE) 
 ```
@@ -399,8 +418,6 @@ resamp <- resamples(list(CART = rpart.fit.bin, # CART tree
                          qda = model.qda,
                          nb = model.nb,
                          knn = model.knn))
-                         #svml = svml.fit,
-                         #svmr = svmr.fit))  
 summary(resamp)
 bwplot(resamp, metric =  "ROC")
 
@@ -645,5 +662,54 @@ fviz_pca_ind(pca,
              addEllipses = TRUE)
 ```
 
+## Revise last time MARS model
+
+```{r}
+library(earth)
+
+apple3 <- read_csv("./data/AppleStore.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-c(x1, id, track_name, currency, ver)) %>%
+  mutate(size_bytes = round(size_bytes * 1e-6),
+         cont_rating = factor(cont_rating, levels = c("4+", "9+","12+","17+"))) %>%
+  rename(size_megabytes = size_bytes) %>%
+  filter(rating_count_tot != 0,
+         user_rating_ver != 0) %>% #Remove apps with no user rating
+  mutate(prime_genre = as.integer(ifelse(prime_genre == "Games", 1, 0))) %>% 
+  dplyr::select(-rating_count_tot, -rating_count_ver, -vpp_lic)
+
+mars_grid <- expand.grid(degree = 1:2,  # to include interaction or not
+                         nprune = 2:20) # how many variables you want to include
+mars_grid
+
+
+set.seed(1234)
+mars.fit <- train(user_rating ~., data = apple3,
+                  subset = trRows,
+                  method = "earth",
+                  tuneGrid = mars_grid,
+                  trControl = ctrl1)
+
+ggplot(mars.fit, highlight = TRUE) # each line is for one degree;
+
+mars.fit$bestTune # model contains 3 variables with interaction terms
+
+coef(mars.fit$finalModel)
+```
+
+create partial dependence plots (PDPs) for each feature individually and also an interaction PDP. This is used to examine the marginal effects of predictors
+
+```{r}
+p1 <- partial(mars.fit, pred.var = c("user_rating_ver"), grid.resolution = 10) %>% autoplot()
+
+p2 <- partial(mars.fit, pred.var = c("user_rating_ver", "size_megabytes"), grid.resolution = 10) %>% plotPartial(levelplot = TRUE, zlab = "yhat", drape = TRUE, 
+            screen = list(z = 20, x = -60))
+
+p3 <- partial(mars.fit, pred.var = c("user_rating_ver", "prime_genre"), grid.resolution = 10) %>% plotPartial(levelplot = TRUE, zlab = "yhat", drape = TRUE, 
+            screen = list(z = 20, x = -60))
+
+grid.arrange(p1, p2, p3, ncol = 3)
+
+```
 
 
